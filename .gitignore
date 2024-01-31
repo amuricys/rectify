@@ -1,0 +1,14 @@
+dist-newstyle
+rectify-frontend/bower_components/
+rectify-frontend/node_modules/
+rectify-frontend/.parcel-cache/
+rectify-frontend/.pulp-cache/
+rectify-frontend/output/
+rectify-frontend/dist/
+rectify-frontend/output-es/
+rectify-frontend/generated-docs/
+rectify-frontend/.psc-package/
+rectify-frontend/.psc*
+rectify-frontend/.purs*
+rectify-frontend/.psa*
+rectify-frontend/.spago

@@ -1,0 +1,107 @@
+cabal-version:      2.2
+name:               rectify-backend
+
+version:            0.1.0.0
+synopsis:
+homepage:
+license:            NONE
+author:             Deco
+maintainer:         decomuricy@gmail.com
+category:           None
+
+common defaults
+  default-language: GHC2021
+  default-extensions:
+    BangPatterns
+    BinaryLiterals
+    ConstraintKinds
+    DataKinds
+    DefaultSignatures
+    DeriveDataTypeable
+    DeriveFoldable
+    DeriveFunctor
+    DeriveGeneric
+    DeriveTraversable
+    DoAndIfThenElse
+    EmptyDataDecls
+    ExistentialQuantification
+    FlexibleContexts
+    FlexibleInstances
+    FunctionalDependencies
+    GADTs
+    GeneralizedNewtypeDeriving
+    InstanceSigs
+    KindSignatures
+    LambdaCase
+    -- MonadFailDesugaring
+    MultiParamTypeClasses
+    MultiWayIf
+    NamedFieldPuns
+    NoImplicitPrelude
+    OverloadedStrings
+    PartialTypeSignatures
+    PatternGuards
+    PolyKinds
+    RankNTypes
+    RecordWildCards
+    ScopedTypeVariables
+    StandaloneDeriving
+    TupleSections
+    TypeFamilies
+    TypeSynonymInstances
+    ViewPatterns
+
+library
+    import: defaults
+    exposed-modules: 
+        Surface
+    other-modules:
+        Effect
+        SimulatedAnnealing
+        Oleg
+        RandoNeur
+    build-depends:    
+        base
+      -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified
+      --, hmatrix
+      , generic-lens
+      , lens
+      , vector-sized
+      , rio
+      , finite-typelits
+      -- Version needed for Control.Monad.Accum
+      , mtl >= 2.3.1
+      , random
+      -- This is chosen because it's fast to generate random numbers
+      , splitmix
+      , effectful
+      , effectful-th
+      -- Needed for concrete AccumT
+      , transformers
+      -- Oleg
+      , deepseq
+      , containers
+      , vector
+    hs-source-dirs:   src
+
+executable rectify
+  import: defaults
+  hs-source-dirs: app
+  main-is: Main.hs
+  build-depends:
+      base
+    , rectify-backend
+    -- Starting web server
+    , servant
+    , servant-server
+    , warp
+    , wai
+    , wai-cors
+    , wai-websockets
+    , websockets
+    , servant-websockets
+    , aeson
+    , rio
+    , stm
+    , text
+  

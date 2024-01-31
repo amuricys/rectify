@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "bundle": "spago bundle",
+    "serve": "parcel index.html --open watch"
+    },
+  "devDependencies": {
+    "parcel": "^2.8.3"
+  }
+}

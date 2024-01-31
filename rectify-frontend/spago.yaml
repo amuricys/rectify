@@ -1,0 +1,22 @@
+package:
+  name: rectify-frontend
+  dependencies:
+    - aff-coroutines
+    - affjax
+    - affjax-web
+    - argonaut-codecs
+    - console
+    - coroutines
+    - effect
+    - either
+    - halogen
+    - maybe
+    - prelude
+    - web-socket
+  test:
+    main: Test.Main
+    dependencies: []
+workspace:
+  package_set:
+    registry: 47.10.0
+  extra_packages: {}
