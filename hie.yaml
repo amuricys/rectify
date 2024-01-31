@@ -1,0 +1,7 @@
+
+cradle:
+  cabal:
+    - path: "./rectify-backend/src"
+      component: "lib:rectify-backend"
+    - path: "./rectify-backend/app/Main.hs"
+      component: "rectify-backend:exe:rectify"
