@@ -31,7 +31,7 @@
           buildInputs = [
             # For PureScript
             pkgs.purs
-            pkgs.spago
+            pkgs.spago-unstable
             pkgs.purs-tidy-bin.purs-tidy-0_10_0
             pkgs.purescript-language-server
             pkgs.nodejs

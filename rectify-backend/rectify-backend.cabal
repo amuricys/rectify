@@ -55,15 +55,16 @@ library
     import: defaults
     exposed-modules: 
         Surface
+        SimulatedAnnealing
     other-modules:
         Effect
-        SimulatedAnnealing
         Oleg
         RandoNeur
     build-depends:    
         base
       -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified
       --, hmatrix
+      , aeson
       , generic-lens
       , lens
       , vector-sized
@@ -104,4 +105,5 @@ executable rectify
     , rio
     , stm
     , text
+    , unliftio
   

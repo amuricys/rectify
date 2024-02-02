@@ -1,0 +1,16 @@
+package:
+  name: rectify
+  dependencies:
+    - rectify-frontend
+workspace:
+  build_opts:
+    censor_library_warnings: all
+  package_set:
+    registry: 47.13.0
+  extra_packages:
+    gojs:
+      path: ../went-stuff/purescript-gojs
+    went:
+      path: ../went-stuff/purescript-went
+    rectify-frontend:
+      path: rectify-frontend

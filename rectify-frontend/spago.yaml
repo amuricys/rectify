@@ -7,16 +7,27 @@ package:
     - argonaut-codecs
     - console
     - coroutines
+    - css
     - effect
     - either
+    - gojs
     - halogen
+    - halogen-css
     - maybe
     - prelude
     - web-socket
+    - went
   test:
     main: Test.Main
     dependencies: []
 workspace:
+  build_opts:
+    censor_library_warnings: all
   package_set:
-    registry: 47.10.0
-  extra_packages: {}
+    registry: 47.13.0
+  extra_packages:
+    went:
+      path: ../../went-stuff/purescript-went
+    gojs:
+      path: ../../went-stuff/purescript-gojs
+
