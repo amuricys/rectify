@@ -3,6 +3,9 @@
     "bundle": "spago bundle",
     "serve": "parcel index.html --open watch"
     },
+  "dependencies": {
+      "gojs": "^2.3.11"
+    },
   "devDependencies": {
     "parcel": "^2.8.3"
   }

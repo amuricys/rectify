@@ -9,6 +9,6 @@
 *generated-docs/
 *.psc-package/
 *.psc*
-*.purs*
+*.purs-repl
 *.psa*
 *.spago

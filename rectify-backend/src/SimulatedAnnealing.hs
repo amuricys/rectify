@@ -1,19 +1,24 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module SimulatedAnnealing where
 
 import Control.Monad.Trans.Accum
 import RIO
 import System.Random.SplitMix
+import System.Random (Random)
+import Data.Aeson (ToJSON (toJSON), Value(Object))
+import Data.Aeson.KeyMap (fromList)
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
-type Probability = Double
+newtype Probability = Probability {unProbability :: Double}
+  deriving newtype (Show, Eq, Num, Ord, Fractional, Random)
 
 data Problem metric beta solution = Problem
   { initial :: SMGen -> solution,
     neighbor :: SMGen -> solution -> solution,
     fitness :: solution -> metric,
-    schedule :: [beta], -- temperature schedule
+    schedule :: Integer -> beta, -- temperature schedule; list of betas represented as fn
     acceptance ::
       solution ->
       solution ->
@@ -23,40 +28,32 @@ data Problem metric beta solution = Problem
       Probability
   }
 
-data SimState metric beta solution = SimState
+data SimState metric solution = SimState
   { currentSolution :: solution,
     currentFitness :: metric,
-    currentBeta :: beta,
+    currentBeta :: Integer,
     gen :: SMGen
   }
+  deriving (Show, Generic)
+instance (ToJSON metric, ToJSON solution) => ToJSON (SimState metric solution) where
+  -- Exclude gen from serialization
+  toJSON SimState {currentSolution, currentFitness, currentBeta} = Object $ fromList
+    [ ("currentSolution", toJSON currentSolution)
+    , ("currentFitness", toJSON currentFitness)
+    , ("currentBeta", toJSON currentBeta)
+    ]
 
-solve ::
-  forall metric beta solution.
+step ::
   Problem metric beta solution ->
-  SMGen ->
-  [solution]
-solve (Problem {initial, neighbor, fitness, schedule, acceptance}) gen = case schedule of
-  [] -> []
-  (h : _) -> evalAccum (go schedule) [init]
-    where
-      init =
-        SimState
-          { currentSolution = initial gen,
-            currentFitness = fitness (initial gen),
-            currentBeta = h,
-            gen = gen
-          }
-      go :: [beta] -> Accum [SimState metric beta solution] [solution]
-      go [] = fmap (fmap currentSolution) look -- fmap into Accum, then into list of states
-      go (beta : betas) = do
-        latestState <-
-          look >>= \case
-            [] -> pure init
-            (x : _) -> pure x
-        let (coinFlip, nextGen) = nextDouble gen
-            next = neighbor nextGen (currentSolution latestState)
-            nextFitness = fitness next
-            accept = acceptance (currentSolution latestState) next (currentFitness latestState) nextFitness beta
-        add $ if accept >= 1.0 || accept >= coinFlip then [SimState {currentSolution = next, currentFitness = nextFitness, currentBeta = beta, gen = nextGen}] else [latestState {gen = nextGen}]
-        go betas
-
+  SimState metric solution ->
+  SimState metric solution
+step (Problem {initial, neighbor, fitness, schedule, acceptance}) s =
+  let (coinFlip, nextGen) = first Probability $ nextDouble (gen s)
+      -- The same generator is used for both the neighbor and the acceptance probability
+      nghb = neighbor nextGen (currentSolution s)
+      nghbFitness = fitness nghb
+      accept = acceptance (currentSolution s) nghb (currentFitness s) nghbFitness (schedule $ currentBeta s)
+      newBeta = currentBeta s + 1
+   in if coinFlip <= accept
+        then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta, gen = nextGen}
+        else s {currentBeta = newBeta, gen = nextGen}

@@ -10,17 +10,21 @@ workspace:
         - argonaut-codecs
         - console
         - coroutines
+        - css
         - effect
         - either
+        - gojs
         - halogen
+        - halogen-css
         - maybe
         - prelude
         - web-socket
+        - went
       test_dependencies: []
   package_set:
     address:
-      registry: 47.10.0
-    compiler: ">=0.15.13 <0.16.0"
+      registry: 47.13.0
+    compiler: ">=0.15.14 <0.16.0"
     content:
       abc-parser: 2.0.1
       ace: 9.1.0
@@ -135,6 +139,7 @@ workspace:
       fetch-argonaut: 1.0.1
       fetch-core: 5.1.0
       fetch-yoga-json: 1.1.0
+      fft-js: 0.1.0
       filterable: 5.0.0
       fix-functor: 0.1.0
       fixed-points: 7.0.0
@@ -164,6 +169,7 @@ workspace:
       generic-router: 0.0.1
       geojson: 0.0.5
       geometry-plane: 1.0.3
+      gojs: 0.1.0
       grain: 3.0.0
       grain-router: 3.0.0
       grain-virtualized: 3.0.0
@@ -388,7 +394,7 @@ workspace:
       sparse-matrices: 1.3.0
       sparse-polynomials: 2.0.5
       spec: 7.5.5
-      spec-mocha: 5.0.0
+      spec-mocha: 5.1.0
       spec-quickcheck: 5.0.0
       splitmix: 2.1.0
       ssrs: 1.0.0
@@ -484,7 +490,11 @@ workspace:
       yoga-tree: 1.0.0
       z3: 0.0.2
       zipperarray: 2.0.0
-  extra_packages: {}
+  extra_packages:
+    gojs:
+      path: ../../went-stuff/purescript-gojs
+    went:
+      path: ../../went-stuff/purescript-went
 packages:
   aff:
     needed_by:
@@ -666,6 +676,20 @@ packages:
         - prelude
         - tuples
         - unfoldable
+  colors:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 7.0.1
+      integrity: sha256-udlg/y2PFsHYli8Tgz8BQGGrOjyGo0BcJj36IfgYADs=
+      dependencies:
+        - arrays
+        - integers
+        - lists
+        - numbers
+        - partial
+        - strings
   console:
     needed_by:
       - rectify-frontend
@@ -721,6 +745,22 @@ packages:
         - freet
         - parallel
         - profunctor
+  css:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 6.0.0
+      integrity: sha256-zfSHxgiU4rSWuVxMjSKKh+s7j433wxmsr+CqI6hm9s4=
+      dependencies:
+        - colors
+        - console
+        - effect
+        - nonempty
+        - profunctor
+        - strings
+        - these
+        - transformers
   datetime:
     needed_by:
       - rectify-frontend
@@ -1011,6 +1051,25 @@ packages:
         - tailrec
         - tuples
         - unfoldable
+  gojs:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: local
+      path: ../../went-stuff/purescript-gojs
+      dependencies:
+        - effect
+        - foldable-traversable
+        - functions
+        - lists
+        - maybe
+        - nullable
+        - prelude
+        - typelevel-prelude
+        - unsafe-coerce
+        - variant
+        - web-events
+        - web-html
   halogen:
     needed_by:
       - rectify-frontend
@@ -1041,6 +1100,16 @@ packages:
         - unsafe-reference
         - web-file
         - web-uievents
+  halogen-css:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 10.0.0
+      integrity: sha256-ZKz2cSbfkcY2faMDwSGu7pa2P8aEHPv/a03Hnyy+mdw=
+      dependencies:
+        - css
+        - halogen
   halogen-subscriptions:
     needed_by:
       - rectify-frontend
@@ -1074,6 +1143,20 @@ packages:
         - tuples
         - unsafe-coerce
         - web-html
+  heterogeneous:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 0.6.0
+      integrity: sha256-cfNYSK6yYmjTrkzk95Otpv6TUUkeBreexwqG/tBvUyg=
+      dependencies:
+        - either
+        - functors
+        - prelude
+        - record
+        - tuples
+        - variant
   http-methods:
     needed_by:
       - rectify-frontend
@@ -1168,6 +1251,20 @@ packages:
         - foldable-traversable
         - invariant
         - prelude
+  lcg:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 4.0.0
+      integrity: sha256-h7ME5cthLfbgJOJdsZcSfFpwXsx4rf8YmhebU+3iSYg=
+      dependencies:
+        - effect
+        - integers
+        - maybe
+        - partial
+        - prelude
+        - random
   lists:
     needed_by:
       - rectify-frontend
@@ -1345,6 +1442,72 @@ packages:
         - newtype
         - prelude
         - tuples
+  psci-support:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 6.0.0
+      integrity: sha256-C6ql4P9TEP06hft/1Z5QumPA4yARR4VIxDdhmL1EO+Y=
+      dependencies:
+        - console
+        - effect
+        - prelude
+  quickcheck:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 8.0.1
+      integrity: sha256-ZvpccKQCvgslTXZCNmpYW4bUsFzhZd/kQUr2WmxFTGY=
+      dependencies:
+        - arrays
+        - console
+        - control
+        - effect
+        - either
+        - enums
+        - exceptions
+        - foldable-traversable
+        - gen
+        - identity
+        - integers
+        - lazy
+        - lcg
+        - lists
+        - maybe
+        - newtype
+        - nonempty
+        - numbers
+        - partial
+        - prelude
+        - record
+        - st
+        - strings
+        - tailrec
+        - transformers
+        - tuples
+        - unfoldable
+  quickcheck-laws:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 7.0.0
+      integrity: sha256-rnzVTiDnymzYkvnhI8EvPwrmO8LgcTnrMTuiI172Tkc=
+      dependencies:
+        - enums
+        - quickcheck
+  random:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 6.0.0
+      integrity: sha256-CJ611a35MPCE7XQMp0rdC6MCn76znlhisiCRgboAG+Q=
+      dependencies:
+        - effect
+        - integers
   record:
     needed_by:
       - rectify-frontend
@@ -1427,6 +1590,20 @@ packages:
         - partial
         - prelude
         - refs
+  these:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 6.0.0
+      integrity: sha256-6poQvFzGw7Ir9mTDEbFV9N6+cUeSHe0FdzTR2ZK1o6g=
+      dependencies:
+        - arrays
+        - gen
+        - lists
+        - quickcheck
+        - quickcheck-laws
+        - tuples
   transformers:
     needed_by:
       - rectify-frontend
@@ -1468,6 +1645,34 @@ packages:
       version: 4.0.1
       integrity: sha256-Hs9D6Y71zFi/b+qu5NSbuadUQXe5iv5iWx0226vOHUw=
       dependencies: []
+  typelevel-lists:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 2.1.0
+      integrity: sha256-h7fTc4i98F/mRizWGIjm91eRwUQlC6/33Lm1JbnD3BE=
+      dependencies:
+        - prelude
+        - tuples
+        - typelevel-peano
+        - typelevel-prelude
+        - unsafe-coerce
+  typelevel-peano:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 1.0.1
+      integrity: sha256-DO/EazDNu07i2ekvj8vIdgH2HdKWUjfohNYo5aNQZy0=
+      dependencies:
+        - arrays
+        - console
+        - effect
+        - prelude
+        - psci-support
+        - typelevel-prelude
+        - unsafe-coerce
   typelevel-prelude:
     needed_by:
       - rectify-frontend
@@ -1508,6 +1713,22 @@ packages:
       integrity: sha256-zU7BhfJU14nXQRZG9iADsp0mSiKhz07OcKyjRB2YT+Y=
       dependencies:
         - prelude
+  variant:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: registry
+      version: 8.0.0
+      integrity: sha256-SR//zQDg2dnbB8ZHslcxieUkCeNlbMToapvmh9onTtw=
+      dependencies:
+        - enums
+        - lists
+        - maybe
+        - partial
+        - prelude
+        - record
+        - tuples
+        - unsafe-coerce
   web-clipboard:
     needed_by:
       - rectify-frontend
@@ -1627,3 +1848,17 @@ packages:
         - web-dom
         - web-file
         - web-html
+  went:
+    needed_by:
+      - rectify-frontend
+    package:
+      type: local
+      path: ../../went-stuff/purescript-went
+      dependencies:
+        - effect
+        - gojs
+        - heterogeneous
+        - nullable
+        - prelude
+        - typelevel-lists
+        - typelevel-prelude

@@ -2,7 +2,8 @@ module Main where
 
 import Prelude
 
-import Button as Button
+import Component.Canvas as Canvas
+import Component.Parent as Parent
 import Control.Coroutine as CR
 import Control.Coroutine.Aff as CRA
 import Control.Monad.Except (runExcept)
@@ -22,7 +23,6 @@ import Web.Socket.Event.MessageEvent as ME
 import Web.Socket.WebSocket as WS
 
 -- Based on https://github.com/purescript-halogen/purescript-halogen/tree/master/examples/driver-websockets
-
 wsProducer :: WS.WebSocket -> CR.Producer String Aff Unit
 wsProducer socket = CRA.produce \emitter -> do
   listener <- EET.eventListener \ev -> do
@@ -38,24 +38,26 @@ wsProducer socket = CRA.produce \emitter -> do
     readHelper :: forall a. a -> Maybe String
     readHelper = either (const Nothing) Just <<< runExcept <<< readString <<< unsafeToForeign
 
-wsConsumer :: (forall a. Button.Query a -> Aff (Maybe a)) -> CR.Consumer String Aff Unit
+wsConsumer :: (forall a. Parent.Query a -> Aff (Maybe a)) -> CR.Consumer String Aff Unit
 wsConsumer query = CR.consumer \msg -> do
-  void $ query $ H.mkTell $ Button.ReceiveMessage msg
+  void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveSimState msg
   pure Nothing
 
-wsSender :: WS.WebSocket -> Button.Output -> Effect Unit
+wsSender :: WS.WebSocket -> Parent.Output -> Effect Unit
 wsSender socket = case _ of
-  Button.SendPause ->
+  Parent.SendPause ->
     WS.sendString socket "pause"
-  Button.SendUnpause ->
+  Parent.SendUnpause ->
     WS.sendString socket "unpause"
+  Parent.SendStep ->
+    WS.sendString socket "step"
 
 main :: Effect Unit
 main = do
   wsConnection <- WS.create "ws:127.0.0.1:8080/ws" []
   HA.runHalogenAff do
     body <- HA.awaitBody
-    io <- runUI Button.buttonComponent unit body
+    io <- runUI Parent.component unit body
     -- Subscribe to all output messages from our component
     _ <- H.liftEffect $ HS.subscribe io.messages $ wsSender wsConnection
     CR.runProcess (wsProducer wsConnection CR.$$ wsConsumer io.query)
