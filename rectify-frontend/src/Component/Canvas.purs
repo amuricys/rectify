@@ -8,6 +8,7 @@ import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Parser (jsonParser)
 import Data.Array (length, (..))
 import Data.Array as Array
+import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Diagram as Diagram
@@ -61,24 +62,8 @@ fromSolution { outer, inner } =
   toLink cat first last i = { key: i, from: i, to: if i /= last then i + 1 else first, category: cat }
   toPoint cat idplus p = { key: idplus + p.id, loc: show (p.x * 200.0) <> " " <> show (p.y * 200.0), category: cat }
 
-parse
-  :: String
-  -> Either String
-       { nodes :: Array (Record Diagram.NodeData)
-       , links :: Array (Record Diagram.LinkData)
-       }
-parse s = do
-  case jsonParser s of
-    Left s -> Left s
-    Right json -> do
-      case dec json of
-        Left err -> Left $ show err
-        Right { currentSolution } -> Right
-          { nodes: (fromSolution currentSolution).nodes
-          , links: (fromSolution currentSolution).links
-          }
-      where
-      dec = decodeJson @(BackendSimState Solution)
+parse :: String -> Either String { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
+parse = pure <<< fromSolution <<< _.currentSolution <=< lmap show <<< decodeJson @(BackendSimState Solution) <=< jsonParser
 
 handleQuery :: forall m output a. MonadEffect m => Query a -> H.HalogenM CanvasState Action () output m (Maybe a)
 handleQuery = case _ of
