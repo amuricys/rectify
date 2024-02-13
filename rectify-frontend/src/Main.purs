@@ -13,6 +13,7 @@ import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Foreign (readString, unsafeToForeign)
+import GoJS.Debug (ffilog)
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.Subscription as HS
@@ -55,6 +56,7 @@ wsSender socket = case _ of
 main :: Effect Unit
 main = do
   wsConnection <- WS.create "ws:127.0.0.1:8080/ws" []
+  ffilog wsConnection
   HA.runHalogenAff do
     body <- HA.awaitBody
     io <- runUI Parent.component unit body

@@ -5,3 +5,5 @@ cradle:
       component: "lib:rectify-backend"
     - path: "./rectify-backend/app/Main.hs"
       component: "rectify-backend:exe:rectify"
+    - path: "./rectify-backend/test"
+      component: "rectify-backend:test-suite:rectify-test"

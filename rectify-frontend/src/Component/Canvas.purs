@@ -6,11 +6,12 @@ import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Parser (jsonParser)
-import Data.Array (length, (..))
+import Data.Array (length, zip, (..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
+import Data.Tuple (Tuple(..))
 import Diagram as Diagram
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
@@ -44,13 +45,13 @@ type BackendSimState sol =
   , currentSolution :: sol
   }
 
-type BackendPoint = { id :: Int, x :: Number, y :: Number }
+type BackendPoint = { x :: Number, y :: Number }
 
 fromSolution :: Solution -> { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
 fromSolution { outer, inner } =
   { nodes: Array.concat
-      [ map (toPoint "Outer" 0) outer
-      , map (toPoint "Inner" outerLength) inner
+      [ map (toPoint "Outer" 0) (zip (0 .. length outer) outer)
+      , map (toPoint "Inner" outerLength) (zip (0 .. length inner) inner)
       ]
   , links: Array.concat
       [ map (toLink "Outer" 0 (length outer - 1)) (0 .. (length outer - 1))
@@ -60,7 +61,7 @@ fromSolution { outer, inner } =
   where
   outerLength = length outer
   toLink cat first last i = { key: i, from: i, to: if i /= last then i + 1 else first, category: cat }
-  toPoint cat idplus p = { key: idplus + p.id, loc: show (p.x * 200.0) <> " " <> show (p.y * 200.0), category: cat }
+  toPoint cat idplus (Tuple id p) = { key: idplus + id, loc: show p.x <> " " <> show p.y, category: cat }
 
 parse :: String -> Either String { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
 parse = pure <<< fromSolution <<< _.currentSolution <=< lmap show <<< decodeJson @(BackendSimState Solution) <=< jsonParser

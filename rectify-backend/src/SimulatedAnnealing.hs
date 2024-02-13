@@ -1,14 +1,17 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module SimulatedAnnealing where
 
-import Control.Monad.Trans.Accum
-import RIO
-import System.Random.SplitMix
-import System.Random (Random)
-import Data.Aeson (ToJSON (toJSON), Value(Object))
+import Prelude
+
+import Data.Aeson (ToJSON (toJSON), Value (Object))
 import Data.Aeson.KeyMap (fromList)
+import Data.Bifunctor (first)
+import GHC.Generics (Generic)
+import System.Random (Random)
+import System.Random.SplitMix (SMGen, nextDouble)
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
 newtype Probability = Probability {unProbability :: Double}
@@ -16,7 +19,7 @@ newtype Probability = Probability {unProbability :: Double}
 
 data Problem metric beta solution = Problem
   { initial :: SMGen -> solution,
-    neighbor :: SMGen -> solution -> solution,
+    neighbor :: SMGen -> solution -> (SMGen, solution),
     fitness :: solution -> metric,
     schedule :: Integer -> beta, -- temperature schedule; list of betas represented as fn
     acceptance ::
@@ -35,25 +38,31 @@ data SimState metric solution = SimState
     gen :: SMGen
   }
   deriving (Show, Generic)
+instance (Eq metric, Eq solution) => Eq (SimState metric solution) where
+  (==) a b = currentSolution a == currentSolution b && currentFitness a == currentFitness b && currentBeta a == currentBeta b
+
 instance (ToJSON metric, ToJSON solution) => ToJSON (SimState metric solution) where
   -- Exclude gen from serialization
-  toJSON SimState {currentSolution, currentFitness, currentBeta} = Object $ fromList
-    [ ("currentSolution", toJSON currentSolution)
-    , ("currentFitness", toJSON currentFitness)
-    , ("currentBeta", toJSON currentBeta)
-    ]
+  toJSON SimState {currentSolution, currentFitness, currentBeta} =
+    Object $
+      fromList
+        [ ("currentSolution", toJSON currentSolution),
+          ("currentFitness", toJSON currentFitness),
+          ("currentBeta", toJSON currentBeta)
+        ]
 
-step ::
+step :: Show metric =>
   Problem metric beta solution ->
   SimState metric solution ->
   SimState metric solution
 step (Problem {initial, neighbor, fitness, schedule, acceptance}) s =
   let (coinFlip, nextGen) = first Probability $ nextDouble (gen s)
       -- The same generator is used for both the neighbor and the acceptance probability
-      nghb = neighbor nextGen (currentSolution s)
+      (nextGen', nghb) = neighbor nextGen (currentSolution s)
       nghbFitness = fitness nghb
-      accept = acceptance (currentSolution s) nghb (currentFitness s) nghbFitness (schedule $ currentBeta s)
+      accept = acceptance s.currentSolution nghb s.currentFitness nghbFitness (schedule s.currentBeta)
+      
       newBeta = currentBeta s + 1
    in if coinFlip <= accept
-        then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta, gen = nextGen}
-        else s {currentBeta = newBeta, gen = nextGen}
+        then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta, gen = nextGen'}
+        else s {currentBeta = newBeta, gen = nextGen'}

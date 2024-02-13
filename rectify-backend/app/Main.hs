@@ -1,68 +1,75 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main where
 
-import Prelude
-import RIO (Text, MonadIO, TVar, forever, readTVarIO, atomically, writeTVar, newTVarIO, finally, ReaderT, runReaderT, MonadReader (ask), MonadUnliftIO (withRunInIO))
-
-import Control.Monad.IO.Class (liftIO)
-import Data.Aeson
+import Control.Concurrent.STM
+import Control.Exception (finally)
+import Control.Monad (forever)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Aeson (FromJSON, ToJSON, encode)
 import GHC.Generics (Generic)
-import Network.Wai
-import Network.Wai.Handler.Warp
+import Network.Wai (Application)
+import Network.Wai.Handler.Warp (run)
 import Network.Wai.Handler.Warp qualified as Warp
 import Network.Wai.Handler.WebSockets (websocketsOr)
 import Network.Wai.Middleware.Cors
+  ( CorsResourcePolicy (corsMethods, corsOrigins, corsRequestHeaders),
+    cors,
+    simpleCorsResourcePolicy,
+  )
 import Network.WebSockets (Connection, DataMessage (..), PendingConnection, acceptRequest, defaultConnectionOptions, forkPingThread, receiveDataMessage, sendDataMessage, sendTextData, withPingThread)
-import UnliftIO.Concurrent (forkIO, yield)
-
+import Problem
+import Debug.Pretty.Simple
 import Servant
   ( Application,
+    Context (EmptyContext, (:.)),
     Handler,
     JSON,
     Post,
     Proxy (..),
     ReqBody,
+    Server,
     serve,
-    type (:<|>) (..),
+    serveWithContext,
     (:<|>),
-    type (:>), Server, Context ((:.), EmptyContext), serveWithContext,
+    type (:<|>) (..),
+    type (:>),
   )
 import Servant.API.WebSocket
-import Surface (circularSurface2D, modifySurf, sched, freeEnergy, acceptanceProbability, seed, Surface (..))
-import SimulatedAnnealing (Problem(..), step, SimState (..))
-import RIO.Text (pack)
-import qualified RIO.ByteString.Lazy as RIO.ByteString
+import SimulatedAnnealing (Problem (..), SimState (..), step)
+import UnliftIO.Concurrent (forkIO, yield)
+import Prelude
 
 -- Define a type for your API
 type ServantType =
   "mypostendpoint" :> ReqBody '[JSON] MyRequest :> Post '[JSON] MyResponse
-  :<|> 
-  "ws" :> WebSocketPending
+    :<|> "ws" :> WebSocketPending
 
 data MyRequest = MyRequest {message :: String}
   deriving (Eq, Show, Generic)
 
 instance FromJSON MyRequest
+
 instance ToJSON MyRequest
 
 data MyResponse = MyResponse {reply :: String}
   deriving (Eq, Show, Generic)
 
 instance FromJSON MyResponse
+
 instance ToJSON MyResponse
 
 data State = Paused | Running | Stepping
 
 data Ctx = Ctx
-  { stateVar :: TVar State
-  , conn :: Connection
+  { stateVar :: TVar State,
+    conn :: Connection
   }
 
 postHandler :: MyRequest -> Handler MyResponse
@@ -84,51 +91,42 @@ wsApp pending = liftIO $ do
   stateVar <- newTVarIO Paused
   let ctx = Ctx {stateVar, conn}
   handleAndSend ctx
-  where 
+  where
     handleAndSend ctx = do
       -- Handle client messages in a new thread
-      _ <- forkIO $ finally (runReaderT handleClientMessages ctx) (putStrLn "Client disconnected")
+      _ <- forkIO $ finally (handleClientMessages ctx) (putStrLn "Client disconnected")
       -- Use the main thread to send messages to the client
-      runReaderT serverSendMessage ctx
+      serverSendMessage ctx
 
-serverSendMessage :: ReaderT Ctx IO ()
-serverSendMessage = do
-  Ctx {stateVar, conn} <- ask
-  let surf = circularSurface2D @150 @150 0 0 1 0.2
-      initialGrayMatterArea = 0.0
-      problem = Problem {
-        initial = const surf, 
-        neighbor = modifySurf (0.04, -0.04), 
-        fitness = freeEnergy initialGrayMatterArea, 
-        schedule = sched,
-        acceptance = \_ _ -> acceptanceProbability
-      }
-  loop stateVar conn problem SimState {currentSolution = surf, currentFitness = freeEnergy initialGrayMatterArea surf, currentBeta = 0, gen = seed}
-  where 
+serverSendMessage :: Ctx -> IO ()
+serverSendMessage Ctx {stateVar, conn} = do
+  let problem = Problem.surfaceProblem @250 @250 @7 200 5
+      is = problem.initial seed
+      f = problem.fitness is
+  loop stateVar conn problem SimState {currentSolution = is, currentFitness = f, currentBeta = 0, gen = seed}
+  where
     loop stateVar conn problem simState = do
       -- Try reading from the shared state variable - if the state is Paused
       -- force another thread to run by yielding. If it's Running, perform one step
       -- and send its result to the client.
-      next <- readTVarIO stateVar >>= \case 
-        Paused -> yield >> pure simState
-        Stepping -> do
-          let next = step problem simState
-              asStr = encode next
-          liftIO . RIO.ByteString.putStrLn $ "Sending message to client: " <> asStr
-          liftIO $ sendTextData conn asStr
-          atomically $ writeTVar stateVar Paused
-          pure next
-        Running -> do
-          let next = step problem simState
-              asStr = encode next
-          -- liftIO . RIO.ByteString.putStrLn $ "Sending message to client: " <> asStr
-          liftIO $ sendTextData conn asStr
-          pure next
+      next <-
+        readTVarIO stateVar >>= \case
+          Paused -> yield >> pure simState
+          Stepping -> do
+            let next = step problem simState
+                asStr = encode next
+            liftIO $ sendTextData conn asStr
+            atomically $ writeTVar stateVar Paused
+            pure next
+          Running -> do
+            let next = step problem simState
+                asStr = encode next
+            liftIO $ sendTextData conn asStr
+            pure next
       loop stateVar conn problem next
 
-handleClientMessages :: ReaderT Ctx IO ()
-handleClientMessages = do
-  Ctx {stateVar, conn} <- ask
+handleClientMessages :: Ctx -> IO ()
+handleClientMessages Ctx {stateVar, conn} = do
   -- Ping the client every 30 seconds to keep the connection alive
   liftIO $ withPingThread conn 30 (putStrLn "Pinged!") $ forever $ do
     msg <- receiveDataMessage conn
