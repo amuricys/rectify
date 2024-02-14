@@ -22,6 +22,7 @@ import SimulatedAnnealing (Probability (..))
 import System.Random (Random, StdGen, randomIO, randomRIO, uniformR)
 import System.Random.SplitMix (SMGen, mkSMGen, nextDouble, nextInteger)
 import System.Random.Stateful (StatefulGen)
+import qualified Surface.Index as Index
 
 newtype X = X {unX :: Double}
   deriving newtype (Show, Eq, Ord, Num, Fractional, FromJSON, ToJSON, Random)
@@ -78,9 +79,6 @@ crossProduct (Point2D (X x1) (Y y1)) (Point2D (X x2) (Y y2)) = x1 * y2 - y1 * x2
 infixl 8 ×
 
 type Line = (Point2D, Point2D)
-
-toLines :: [Point2D] -> [Line]
-toLines ps = zip ps (tail $ cycle ps)
 
 intersection :: Line -> Line -> Maybe Point2D
 intersection (p1, p2) (p3, p4) =

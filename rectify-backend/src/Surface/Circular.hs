@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -5,18 +6,19 @@
 
 module Surface.Circular where
 
-import Prelude
+import Prelude hiding ((++))
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Finite (Finite, getFinite)
 import Data.Proxy (Proxy (..))
-import Data.Vector.Sized (Vector, generate, index)
+import Data.Vector.Sized (Vector, generate, index, (++))
 import Data.Vector.Sized qualified as V
-import GHC.TypeLits (KnownNat, natVal)
-import System.Random (Random)
-
+import GHC.TypeLits (KnownNat, natVal, type (+))
 import Surface.Index (next, prev)
-import Surface.LinAlg (Point2D (..), X (..), Y (..))
+import Surface.Index qualified as Index
+import Surface.LinAlg (Line, Point2D (..), X (..), Y (..), add, dist, scalarMult)
+import System.Random (Random)
+import Unsafe.Coerce (unsafeCoerce)
 
 type Circular i = Vector i Point2D
 
@@ -38,3 +40,24 @@ area v = V.foldl' (\acc i -> acc + unX (x (v `index` i)) * unY (y (v `index` nex
   where
     indices :: Vector n (Finite n)
     indices = generate id
+
+addPoint :: forall i n m. (KnownNat n, KnownNat i, n ~ i + m) => Point2D -> Circular n -> Circular (1 + n)
+addPoint p g = convert $ V.take @i g ++ V.cons p (V.drop @i g)
+  where
+    convert :: Circular (i + (1 + m)) -> Circular (1 + n)
+    convert = unsafeCoerce
+
+toCircularLines :: KnownNat n => Vector n Point2D -> Vector n Line
+toCircularLines ps = generate $ \i -> (ps `index` i, ps `index` Index.next i)
+
+toAdd :: forall n. KnownNat n => Double -> Vector n Line -> [(Finite n, Point2D)]
+toAdd threshold v = V.foldl' folder [] (V.generate id)
+  where
+    folder :: [(Finite n, Point2D)] -> Finite n -> [(Finite n, Point2D)]
+    folder acc i =
+      if dist p1 p2 > threshold
+        then (i, p1 `add` p2 `scalarMult` 0.5) : acc
+        else acc
+      where
+        (p1, p2) = v `index` i
+

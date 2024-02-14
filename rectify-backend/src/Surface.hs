@@ -7,7 +7,10 @@
 
 module Surface where
 
-import Data.Aeson (FromJSON, ToJSON (toJSON), Value)
+import Prelude hiding (drop, (++))
+
+import Data.Aeson (FromJSON, ToJSON (toJSON), Value (Object))
+import Data.Aeson.KeyMap (fromList)
 import Data.Bifunctor (first)
 import Data.Finite (Finite, finite, getFinite)
 import Data.Foldable (find)
@@ -22,40 +25,44 @@ import Data.Type.Ord (type (<))
 import Data.Vector qualified as Unsized
 import Data.Vector.Sized (Vector, cons, drop, generate, index, (++), (//))
 import Data.Vector.Sized qualified as V
+import Debug.Pretty.Simple
 import GHC.Generics (Generic)
 import GHC.TypeLits (CmpNat, KnownNat, Mod, Nat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+), type (-), type (<=?))
 import SimulatedAnnealing (Probability (..), Problem (..))
-import Surface.Circular (Circular, Compression (Compression), Radius (..), circularGraph)
+import Surface.Circular (Circular, Compression (Compression), Radius (..), circularGraph, toCircularLines)
 import Surface.Index qualified as Index
-import Surface.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection, toLines)
+import Surface.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection)
 import System.Random.SplitMix (SMGen, nextDouble, nextInteger)
-import Prelude hiding (drop, (++))
-import Debug.Pretty.Simple
+import Unsafe.Coerce (unsafeCoerce)
 
 -- Hmm.
 class SurfaceData (dim :: Nat) where
   type Point dim :: Type
-  volume :: forall o i. Surface o i (Point dim) (Point dim) -> Double
-  perimeter :: forall o i. Surface o i (Point dim) (Point dim) -> Double
+  volume :: forall o i. Surface (Point dim) (Point dim) -> Double
+  perimeter :: forall o i. Surface (Point dim) (Point dim) -> Double
 
-data Surface o i outerPoint innerPoint = Surface
+data Surface outerPoint innerPoint = forall o i oprev iprev.
+  (KnownNat o, KnownNat i, o ~ oprev + 1, i ~ iprev + 1) =>
+  Surface
   { outer :: Vector o outerPoint,
     inner :: Vector i innerPoint
   }
-  deriving (Generic, Show, Eq)
+
+-- deriving instance (Eq outerPoint, Eq innerPoint) => Eq (Surface outerPoint innerPoint)
+-- deriving instance (Show outerPoint, Show innerPoint) => Show (Surface outerPoint innerPoint)
 
 instance ToJSON a => ToJSON (Vector n a) where
   toJSON :: ToJSON a => Vector n a -> Value
   toJSON = toJSON . V.toList
 
-instance (ToJSON op, ToJSON ip) => ToJSON (Surface o i op ip)
-
--- addOuterPoint :: forall n m point i. (KnownNat n) => point -> Surface (n + m) i point -> Surface (n + m) i point
-addOuterPoint :: forall n m i op ip. (KnownNat n) => op -> Surface (n + m) i op ip -> Surface (n + (1 + m)) i op ip
-addOuterPoint p (Surface outer inner) = Surface (V.take @n outer ++ cons p (drop @n outer)) inner
-
-addInnerPoint :: forall n m o op ip. (KnownNat n) => ip -> Surface o (n + m) op ip -> Surface o (n + (1 + m)) op ip
-addInnerPoint p (Surface outer inner) = Surface outer (V.take @n inner ++ cons p (drop @n inner))
+instance (ToJSON op, ToJSON ip) => ToJSON (Surface op ip) where
+  toJSON :: (ToJSON op, ToJSON ip) => Surface op ip -> Value
+  toJSON (Surface outer inner) =
+    Object $
+      fromList
+        [ ("outer", toJSON outer),
+          ("inner", toJSON inner)
+        ]
 
 data Change = Change
   { xChange :: X,
@@ -75,11 +82,11 @@ instance Monoid Change where
 newtype Thickness = Thickness {unThickness :: Double}
   deriving newtype (Show, Eq, Num, Fractional, FromJSON, ToJSON)
 
-circularSurface2D :: forall o i. (KnownNat o) => (KnownNat i) => X -> Y -> Radius -> Thickness -> Surface o i Point2D Point2D
+circularSurface2D :: forall o i oprev iprev. (KnownNat o) => (KnownNat i) => o ~ oprev + 1 => i ~ iprev + 1 => X -> Y -> Radius -> Thickness -> Surface Point2D Point2D
 circularSurface2D centerx centery radius thickness =
   Surface
-    (circularGraph centerx centery radius)
-    (circularGraph centerx centery (Radius $ unRadius radius - unThickness thickness))
+    (circularGraph @o centerx centery radius)
+    (circularGraph @i centerx centery (Radius $ unRadius radius - unThickness thickness))
 
 smooth ::
   forall range n.
@@ -126,10 +133,10 @@ innerChangesFromOuterChanges internalIndices outerChanges inner outer =
 
 -- Takes in a circular graph and a map of changes and finds two nodes: the two that are OUTSIDE the map
 -- of changes but IN in the graph whose prev and next ARE in the map of changes
-mostPrevNext :: forall m mprev n. m ~ mprev + 1 => m ~ 1 + mprev =>  KnownNat n => Vector m (Finite n, Change) -> Circular n -> (Point2D, Point2D)
+mostPrevNext :: forall m mprev n. m ~ mprev + 1 => m ~ 1 + mprev => KnownNat n => Vector m (Finite n, Change) -> Circular n -> (Point2D, Point2D)
 mostPrevNext nc g =
-  let mostNext = Index.next . fst  . V.last $ nc
-      mostPrev = Index.prev . fst  . V.head $ nc
+  let mostNext = Index.next . fst . V.last $ nc
+      mostPrev = Index.prev . fst . V.head $ nc
    in (g `index` mostPrev, g `index` mostNext)
 
 -- TODO: Partition-optimize
@@ -157,16 +164,16 @@ pushInners ::
   KnownNat o =>
   KnownNat i =>
   KnownNat avg =>
-  avg < i =>
   o ~ oprev + 1 =>
   i ~ iprev + 1 =>
   n ~ nprev + 1 =>
   n ~ 1 + nprev =>
-  Surface o i Point2D Point2D ->
+  Circular o ->
+  Circular i ->
   Vector n (Finite o, Change) ->
   Compression ->
   [(Finite i, Change)]
-pushInners (Surface outer inner) outerChanges compression =
+pushInners outer inner outerChanges compression =
   let (mostPrev, mostNext) = mostPrevNext outerChanges outer
    in case closestInternalNodes mostPrev mostNext inner of
         (LessThan (p1 :: Proxy k), LessThan (p2 :: Proxy m)) ->
@@ -175,18 +182,13 @@ pushInners (Surface outer inner) outerChanges compression =
            in innerChangesFromOuterChanges @avg internalIndices outerChanges inner outer
 
 modifySurf ::
-  forall avg o i oprev iprev.
-  KnownNat o =>
-  o ~ oprev + 1 =>
-  KnownNat i =>
-  i ~ iprev + 1 =>
+  forall avg.
   KnownNat avg =>
-  avg < i =>
   (Double, Double) -> -- range of random change to x and y
   SMGen ->
-  Surface o i Point2D Point2D ->
-  (SMGen, Surface o i Point2D Point2D)
-modifySurf (high, low) gen s@(Surface outer inner) =
+  Surface Point2D Point2D ->
+  (SMGen, Surface Point2D Point2D)
+modifySurf (high, low) gen s@(Surface (outer :: Vector o Point2D) (inner :: Vector i Point2D)) =
   let -- Choose a random point on the outer surface (- 1 because nextInteger interval is closed)
       (i, newgen) = first finite $ nextInteger 0 (natVal (Proxy @o) - 1) gen
       -- Choose a random change to x and y
@@ -194,12 +196,11 @@ modifySurf (high, low) gen s@(Surface outer inner) =
       (yChange, newgen'') = first (\y -> Y $ y * 2 * high + low) (nextDouble newgen')
       c = Change xChange yChange
       smoothedOuterChanges = smooth @8 i c linear
-      smoothedInnerChanges = pushInners @avg s smoothedOuterChanges (Compression 0.0)
+      smoothedInnerChanges = pushInners @avg outer inner smoothedOuterChanges (Compression 0.0)
       -- Apply the changes first so that detecting intersections is easier
       appliedOuter = outer // (applyChange outer <$> V.toList smoothedOuterChanges)
       appliedInner = inner // (applyChange inner <$> smoothedInnerChanges)
-      possibly = toLines (V.toList appliedOuter) <> toLines (V.toList appliedInner)
-   in case linesIntersection possibly of
+   in case linesIntersection . V.toList $ toCircularLines appliedOuter ++ toCircularLines appliedInner of
         Just p -> (newgen'', s)
         Nothing -> (newgen'', Surface appliedOuter appliedInner)
   where

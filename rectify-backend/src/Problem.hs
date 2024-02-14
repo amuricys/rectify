@@ -9,7 +9,7 @@ import Prelude
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.TypeLits (KnownNat, type (+), type (<=))
 import SimulatedAnnealing (Probability (Probability), Problem (..))
-import Surface (Surface (inner, outer), Thickness, circularSurface2D, modifySurf)
+import Surface (Surface (inner, outer, Surface), Thickness, circularSurface2D, modifySurf)
 import Surface.Circular (Radius (unRadius), area)
 import Surface.LinAlg (Point2D)
 import System.Random.SplitMix (SMGen, mkSMGen)
@@ -33,10 +33,12 @@ surfaceProblem ::
   Radius ->
   -- | Initial surface thickness
   Thickness ->
-  Problem Energy Temperature (Surface o i Point2D Point2D)
+  Problem Energy Temperature (Surface Point2D Point2D)
 surfaceProblem radius thickness =
   let initialSurf = circularSurface2D @o @i 0 0 radius thickness
-      initialGrayMatterArea = area initialSurf.outer - area initialSurf.inner
+      initialGrayMatterArea = case initialSurf of 
+        -- this pattern matching is needed so the constraints on outer and inner are brought into scope
+        Surface outer inner -> area outer - area inner
    in Problem
         { initial = const initialSurf,
           neighbor = modifySurf @avg (40, -40),
@@ -52,11 +54,11 @@ sched i =
         then 0.0
         else Temperature progression
 
-freeEnergy :: forall o i. KnownNat o => KnownNat i => Double -> Surface o i Point2D Point2D -> Energy
-freeEnergy initialGrayMatter surf = Energy $ whiteMatter + (1.0 + grayMatterStretch) ** 2.0
+freeEnergy :: Double -> Surface Point2D Point2D -> Energy
+freeEnergy initialGrayMatter (Surface inner outer) = Energy $ whiteMatter + (1.0 + grayMatterStretch) ** 2.0
   where
-    whiteMatter = area surf.inner
-    grayMatter = abs $ area surf.outer - whiteMatter
+    whiteMatter = area inner
+    grayMatter = abs $ area outer - whiteMatter
     grayMatterStretch = abs $ (grayMatter - initialGrayMatter) ** 2.0
 
 acceptanceProbability :: Energy -> Energy -> Temperature -> Probability
