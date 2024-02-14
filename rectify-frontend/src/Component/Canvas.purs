@@ -73,7 +73,6 @@ handleQuery = case _ of
     { diagram } <- H.get
     case diagram <#> _model, parse msg of
       Just m, Right { nodes, links } -> do
-        --        liftEffect $ log $ show nodes
         liftEffect $ m # mergeNodeDataArray_ nodes
         liftEffect $ m # mergeLinkDataArray_ links
         pure (Just a)
@@ -99,7 +98,7 @@ component = H.mkComponent
       [ HP.id "myDiagramDiv"
       , HCSS.style do
           CSS.flexGrow 1.0
-          CSS.height (CSS.px 1000.0)
+          CSS.height (CSS.px 500.0)
           CSS.backgroundColor (CSS.white)
           CSS.position CSS.relative
           CSS.cursor CSS.Cursor.default

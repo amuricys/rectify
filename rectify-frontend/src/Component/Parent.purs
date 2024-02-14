@@ -2,6 +2,7 @@ module Component.Parent where
 
 import Prelude
 
+import Component.Banner as Banner
 import Component.Button as Button
 import Component.Canvas as Canvas
 import Data.Maybe (Maybe(..))
@@ -26,22 +27,25 @@ component =
     , eval: H.mkEval H.defaultEval { handleAction = handleAction, handleQuery = handleQuery }
     }
 
-handleQuery :: forall m output buttonQuery a. Query a -> H.HalogenM ComponentState Action (Slots buttonQuery) output m (Maybe a)
+handleQuery :: forall m output q a. Query a -> H.HalogenM ComponentState Action (Slots q) output m (Maybe a)
 handleQuery = case _ of
   CanvasQuery (Canvas.ReceiveSimState str a) -> do
     H.tell (Proxy @"canvas") 0 (Canvas.ReceiveSimState str)
     pure (Just a)
 
-type Slots buttonQuery =
-  ( button :: Slot buttonQuery Button.Output Int
+type Slots q =
+  -- banner and button do not use a query
+  ( banner :: Slot q Void Int
+  , button :: Slot q Button.Output Int
   , canvas :: Slot Canvas.Query Void Int
   )
 
-render :: forall m s buttonQuery. MonadEffect m => s -> H.ComponentHTML Action (Slots buttonQuery) m
+render :: forall m s q. MonadEffect m => s -> H.ComponentHTML Action (Slots q) m
 render _ =
   HH.div_
-    [ HH.slot_ (Proxy @"canvas") 0 Canvas.component unit
-    , HH.slot (Proxy @"button") 1 Button.component unit buttonAct
+    [ HH.slot_ (Proxy @"banner") 0 Banner.component unit
+    , HH.slot_ (Proxy @"canvas") 1 Canvas.component unit
+    , HH.slot (Proxy @"button") 2 Button.component unit buttonAct
     ]
   where
   buttonAct :: Button.Output -> Action
