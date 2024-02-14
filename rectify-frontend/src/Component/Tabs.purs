@@ -5,12 +5,10 @@ import Prelude
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import CSS.Overflow as CSS.Overflow
-import Halogen (ClassName(..))
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Events as HE
-import Halogen.HTML.Properties as HP
 
 data ActiveTab = Surface | TSP | Reservoir
 
