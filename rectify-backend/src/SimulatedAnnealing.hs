@@ -17,6 +17,9 @@ import System.Random.SplitMix (SMGen, nextDouble)
 newtype Probability = Probability {unProbability :: Double}
   deriving newtype (Show, Eq, Num, Ord, Fractional, Random)
 
+data Algorithm = Surface | TSP | Reservoir
+  deriving (Eq, Show, Generic)
+
 data Problem metric beta solution = Problem
   { initial :: SMGen -> solution,
     neighbor :: SMGen -> solution -> (SMGen, solution),
@@ -50,6 +53,12 @@ instance (ToJSON metric, ToJSON solution) => ToJSON (SimState metric solution) w
           ("currentFitness", toJSON currentFitness),
           ("currentBeta", toJSON currentBeta)
         ]
+
+problemToInitialSimState :: Problem metric beta solution -> SMGen -> SimState metric solution
+problemToInitialSimState problem seed = let
+  is = problem.initial seed
+  f = problem.fitness is
+  in SimState {currentSolution = is, currentFitness = f, currentBeta = 0, gen = seed}
 
 step :: Show metric =>
   Problem metric beta solution ->

@@ -24,7 +24,6 @@ import Data.Type.Bool (If)
 import Data.Type.Ord (type (<))
 import Data.Vector.Sized (Vector, cons, drop, generate, index, (++), (//))
 import Data.Vector.Sized qualified as V
-import Debug.Pretty.Simple
 import GHC.Generics (Generic)
 import GHC.TypeLits (CmpNat, KnownNat, Mod, Nat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+), type (-), type (<=?))
 import SimulatedAnnealing (Probability (..), Problem (..))

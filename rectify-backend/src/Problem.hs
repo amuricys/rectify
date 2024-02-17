@@ -1,6 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module Problem where
 

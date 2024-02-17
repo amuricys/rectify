@@ -1,7 +1,6 @@
 module App where
 
-
-import Control.Concurrent.STM
+import Control.Concurrent.STM (TVar, atomically, modifyTVar, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (finally)
 import Control.Monad (forever)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -17,8 +16,7 @@ import Network.Wai.Middleware.Cors
     simpleCorsResourcePolicy,
   )
 import Network.WebSockets (Connection, DataMessage (..), PendingConnection, acceptRequest, defaultConnectionOptions, forkPingThread, receiveDataMessage, sendDataMessage, sendTextData, withPingThread)
-import Problem
-import Debug.Pretty.Simple
+import Problem (seed, surfaceProblem)
 import Servant
   ( Application,
     Context (EmptyContext, (:.)),
@@ -34,8 +32,8 @@ import Servant
     type (:<|>) (..),
     type (:>),
   )
-import Servant.API.WebSocket
-import SimulatedAnnealing (Problem (..), SimState (..), step)
+import Servant.API.WebSocket (WebSocketPending)
+import SimulatedAnnealing (Algorithm (..), Problem (..), SimState (..), problemToInitialSimState, step)
 import UnliftIO.Concurrent (forkIO, yield)
 import Prelude
 
@@ -58,7 +56,11 @@ instance FromJSON MyResponse
 
 instance ToJSON MyResponse
 
-data State = Paused | Running | Stepping
+data RunState = Paused | Running | Stepping
+  deriving (Eq, Show, Generic)
+
+data State = State {currentAlgorithm :: Algorithm, runState :: RunState}
+  deriving (Eq, Show, Generic)
 
 data Ctx = Ctx
   { stateVar :: TVar State,
@@ -81,41 +83,57 @@ wsApp pending = liftIO $ do
   conn <- acceptRequest pending
   putStrLn "Client connected"
   -- Create a shared state variable where the communication between threads happens
-  stateVar <- newTVarIO Paused
+  stateVar <- newTVarIO State {currentAlgorithm = Surface, runState = Paused}
   let ctx = Ctx {stateVar, conn}
   handleAndSend ctx
   where
     handleAndSend ctx = do
       -- Handle client messages in a new thread
       _ <- forkIO $ finally (handleClientMessages ctx) (putStrLn "Client disconnected")
-      -- Use the main thread to send messages to the client
-      serverSendMessage ctx
+      -- Handle each problem in a separate thread
+      _ <- forkIO $ serverSendMessage Surface (Problem.surfaceProblem @250 @250 @7 200 5) ctx
+      _ <- forkIO $ serverSendMessage TSP (Problem.surfaceProblem @250 @250 @7 200 5) ctx
+      _ <- forkIO $ serverSendMessage Reservoir (Problem.surfaceProblem @250 @250 @7 200 5) ctx
+      -- The main thread then does nothing
+      yield
 
-serverSendMessage :: Ctx -> IO ()
-serverSendMessage Ctx {stateVar, conn} = do
-  let problem = Problem.surfaceProblem @250 @250 @7 200 5
-      is = problem.initial seed
-      f = problem.fitness is
-  loop stateVar conn problem SimState {currentSolution = is, currentFitness = f, currentBeta = 0, gen = seed}
+-- TODO: Associate Algorithm type with Problem somehow, so that it becomes
+-- impossible to call this function with a TSP with the wrong Problem record.
+serverSendMessage ::
+  Show metric =>
+  ToJSON metric =>
+  ToJSON solution =>
+  Algorithm ->
+  Problem metric beta solution ->
+  Ctx ->
+  IO ()
+serverSendMessage thisThreadsAlgorithm problem Ctx {stateVar, conn} =
+  loop stateVar conn problem (problemToInitialSimState problem seed)
   where
     loop stateVar conn problem simState = do
-      -- Try reading from the shared state variable - if the state is Paused
-      -- force another thread to run by yielding. If it's Running, perform one step
-      -- and send its result to the client.
+      -- Try reading from the shared state variable - if this thread's algorithm is not the
+      -- one in the state variable, or the state is Paused, force another read to run by yielding
+      -- If it's Running or Stepping, perform one step and send its result to the client.
+
+      -- TODO: I don't like all this yielding. Feels like the thread should sleep instead
+      -- and be woken up when it's supposed to do something.
       next <-
-        readTVarIO stateVar >>= \case
-          Paused -> yield >> pure simState
-          Stepping -> do
-            let next = step problem simState
-                asStr = encode next
-            liftIO $ sendTextData conn asStr
-            atomically $ writeTVar stateVar Paused
-            pure next
-          Running -> do
-            let next = step problem simState
-                asStr = encode next
-            liftIO $ sendTextData conn asStr
-            pure next
+        readTVarIO stateVar >>= \(State currentAlgorithm runState) ->
+          if currentAlgorithm /= thisThreadsAlgorithm
+            then yield >> pure simState
+            else case runState of
+              Paused -> yield >> pure simState
+              Stepping -> do
+                let next = step problem simState
+                    asStr = encode next
+                liftIO $ sendTextData conn asStr
+                atomically $ modifyTVar stateVar (\s -> s {runState = Paused})
+                pure next
+              Running -> do
+                let next = step problem simState
+                    asStr = encode next
+                liftIO $ sendTextData conn asStr
+                pure next
       loop stateVar conn problem next
 
 handleClientMessages :: Ctx -> IO ()
@@ -126,15 +144,24 @@ handleClientMessages Ctx {stateVar, conn} = do
     putStrLn $ "Received message from client: " ++ show msg
     state <- readTVarIO stateVar
     case (msg, state) of
-      (Text "Unpause" _, Paused) -> do
+      (Text "Unpause" _, State _ Paused) -> do
         putStrLn "Unpausing"
-        atomically $ writeTVar stateVar Running
-      (Text "Step" _, Paused) -> do
+        atomically $ modifyTVar stateVar (\s -> s {runState = Running})
+      (Text "Step" _, State _ Paused) -> do
         putStrLn "Stepping"
-        atomically $ writeTVar stateVar Stepping
-      (Text "Pause" _, Running) -> do
+        atomically $ modifyTVar stateVar (\s -> s {runState = Stepping})
+      (Text "Pause" _, State _ Running) -> do
         putStrLn "Pausing"
-        atomically $ writeTVar stateVar Paused
+        atomically $ modifyTVar stateVar (\s -> s {runState = Paused})
+      (Text "Surface" _, State _ _) -> do
+        putStrLn "Starting Surface"
+        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = Surface}
+      (Text "TSP" _, State _ _) -> do
+        putStrLn "Starting TSP"
+        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = TSP}
+      (Text "Reservoir" _, State _ _) -> do
+        putStrLn "Starting Reservoir"
+        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = Reservoir}
       _ -> pure ()
 
 -- Run the Warp server on port 8080
