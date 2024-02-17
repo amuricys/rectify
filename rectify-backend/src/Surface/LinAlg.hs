@@ -13,7 +13,6 @@ import Data.Kind (Type)
 import Data.List (cycle, tail, tails)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust)
-import Data.Vector qualified as Unsized
 import Data.Vector.Sized (Vector, cons, drop, generate, index, (++), (//))
 import Data.Vector.Sized qualified as V
 import GHC.Generics

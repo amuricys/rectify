@@ -38,6 +38,7 @@ common defaults
     MultiWayIf
     NamedFieldPuns
     NoImplicitPrelude
+    OverloadedRecordDot
     OverloadedStrings
     PartialTypeSignatures
     PatternGuards
@@ -52,37 +53,44 @@ common defaults
     ViewPatterns
 
 library
-    import: defaults
-    exposed-modules: 
-        SimulatedAnnealing
-        Problem
-        Surface
-        Surface.LinAlg
-        Surface.Circular
-        Surface.Index
-    other-modules:
-    build-depends:    
-        base
-      -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified
-      --, hmatrix
-      , aeson
-      , generic-lens
-      , lens
-      , vector-sized
-      , finite-typelits
-      , random
-      -- This is chosen because it's fast to generate random numbers
-      , splitmix
-      , effectful
-      , effectful-th
-      , transformers
-      -- Oleg
-      , deepseq
-      , containers
-      , vector
-      , pretty-simple
-
-    hs-source-dirs:   src
+  import: defaults
+  hs-source-dirs:   src
+  exposed-modules:
+      App
+      SimulatedAnnealing
+      Problem
+      Surface
+      Surface.LinAlg
+      Surface.Circular
+      Surface.Index
+  other-modules:
+  build-depends:    
+      base
+    -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified
+    --, hmatrix
+    , aeson
+    , generic-lens
+    , lens
+    , vector-sized
+    , finite-typelits
+    , random
+    -- This is chosen because it's fast to generate random numbers
+    , splitmix
+    -- For ReaderT
+    , transformers
+    , containers
+    , pretty-simple
+    -- application/server/web stuff
+    , servant
+    , servant-server
+    , servant-websockets
+    , stm
+    , unliftio
+    , warp
+    , wai
+    , wai-cors
+    , wai-websockets
+    , websockets
 
 executable rectify
   import: defaults
@@ -91,21 +99,6 @@ executable rectify
   build-depends:
       base
     , rectify-backend
-    -- Starting web server
-    , servant
-    , servant-server
-    , warp
-    , wai
-    , wai-cors
-    , wai-websockets
-    , websockets
-    , servant-websockets
-    , aeson
-    , rio
-    , stm
-    , text
-    , unliftio
-    , pretty-simple
 
 
 test-suite rectify-test

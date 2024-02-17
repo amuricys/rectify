@@ -22,7 +22,6 @@ import Data.Maybe (fromJust, isNothing)
 import Data.Proxy (Proxy (..))
 import Data.Type.Bool (If)
 import Data.Type.Ord (type (<))
-import Data.Vector qualified as Unsized
 import Data.Vector.Sized (Vector, cons, drop, generate, index, (++), (//))
 import Data.Vector.Sized qualified as V
 import Debug.Pretty.Simple
@@ -113,8 +112,8 @@ linear at max Change {xChange, yChange} = Change (xChange * X ratio) (yChange * 
 change :: Point2D -> Change -> Point2D
 change (Point2D x y) (Change x' y') = Point2D (x + x') (y + y')
 
-newtype Stitching i = Stitching {unStitching :: Map.Map (Finite i) (Unsized.Vector (Finite i, Double, Double))}
-  deriving newtype (Show, Eq)
+-- newtype Stitching i = Stitching {unStitching :: Map.Map (Finite i) (Unsized.Vector (Finite i, Double, Double))}
+--   deriving newtype (Show, Eq)
 
 avgChangeForClosest :: forall n m o i. KnownNat n => Point2D -> Vector m (Finite o, Change) -> Circular o -> Change
 avgChangeForClosest p outerChanges g =
