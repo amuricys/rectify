@@ -133,13 +133,13 @@ handleClientMessages Ctx {stateVar, conn} = do
     putStrLn $ "Received message from client: " ++ show msg
     state <- readTVarIO stateVar
     case (msg, state) of
-      (Text "unpause" _, Paused) -> do
+      (Text "Unpause" _, Paused) -> do
         putStrLn "Unpausing"
         atomically $ writeTVar stateVar Running
-      (Text "step" _, Paused) -> do
+      (Text "Step" _, Paused) -> do
         putStrLn "Stepping"
         atomically $ writeTVar stateVar Stepping
-      (Text "pause" _, Running) -> do
+      (Text "Pause" _, Running) -> do
         putStrLn "Pausing"
         atomically $ writeTVar stateVar Paused
       _ -> pure ()

@@ -2,6 +2,7 @@ module Component.Parent where
 
 import Prelude
 
+import Algorithm (Algorithm)
 import Component.Banner as Banner
 import Component.Button as Button
 import Component.Canvas as Canvas
@@ -12,13 +13,31 @@ import Effect.Class (class MonadEffect)
 import Halogen (Slot)
 import Halogen as H
 import Halogen.HTML as HH
+import RunCommand (RunCommand)
 import Type.Prelude (Proxy(..))
 
 type ComponentState = Unit
-data Action = Pause | Unpause | Step
-data Output = SendPause | SendUnpause | SendStep
+
+data Action = RunAction RunCommand | AlgorithmChangeAction Algorithm
+data Output = SendRunCommand RunCommand | SendAlgorithmChange Algorithm
 
 data Query a = CanvasQuery (Canvas.Query a)
+
+-- Constants to avoid mixing up indices and proxies
+inds :: { banner :: Int , button :: Int , canvas :: Int , tabs :: Int }
+inds = {banner: 0, tabs:1, canvas: 2, button: 3}
+
+_banner :: Proxy "banner"
+_banner = Proxy
+
+_tabs :: Proxy "tabs"
+_tabs = Proxy
+
+_canvas :: Proxy "canvas"
+_canvas = Proxy
+
+_button :: Proxy "button"
+_button = Proxy
 
 component :: forall input m. MonadAff m => H.Component Query input Output m
 component =
@@ -31,7 +50,7 @@ component =
 handleQuery :: forall m output q a. Query a -> H.HalogenM ComponentState Action (Slots q) output m (Maybe a)
 handleQuery = case _ of
   CanvasQuery (Canvas.ReceiveSimState str a) -> do
-    H.tell (Proxy @"canvas") 0 (Canvas.ReceiveSimState str)
+    H.tell _canvas inds.canvas (Canvas.ReceiveSimState str)
     pure (Just a)
 
 type Slots q =
@@ -45,20 +64,18 @@ type Slots q =
 render :: forall m s q. MonadEffect m => s -> H.ComponentHTML Action (Slots q) m
 render _ =
   HH.div_
-    [ HH.slot_ (Proxy @"banner") 0 Banner.component unit
-    , HH.slot_ (Proxy @"tabs") 1 Tabs.component unit
-    , HH.slot_ (Proxy @"canvas") 2 Canvas.component unit
-    , HH.slot (Proxy @"button") 3 Button.component unit buttonAct
+    [ HH.slot_ _banner inds.banner Banner.component unit
+    , HH.slot _tabs inds.tabs Tabs.component unit tabsAct
+    , HH.slot_ _canvas inds.canvas Canvas.component unit
+    , HH.slot _button inds.button Button.component unit buttonAct
     ]
   where
   buttonAct :: Button.Output -> Action
-  buttonAct = case _ of
-    Button.SendPause -> Pause
-    Button.SendUnpause -> Unpause
-    Button.SendStep -> Step
+  buttonAct (Button.Send runCmd) = RunAction runCmd
+  tabsAct :: Tabs.Output -> Action
+  tabsAct (Tabs.Selected alg) = AlgorithmChangeAction alg
 
 handleAction :: forall slots m. MonadAff m => Action -> H.HalogenM ComponentState Action slots Output m Unit
 handleAction = case _ of
-  Pause -> H.raise $ SendPause
-  Unpause -> H.raise $ SendUnpause
-  Step -> H.raise $ SendStep
+  RunAction cmd -> H.raise $ SendRunCommand cmd
+  AlgorithmChangeAction alg -> H.raise $ SendAlgorithmChange alg

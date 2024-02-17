@@ -2,6 +2,7 @@ module Component.Tabs where
 
 import Prelude
 
+import Algorithm (Algorithm(..))
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import CSS.Overflow as CSS.Overflow
@@ -10,12 +11,9 @@ import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Events as HE
 
-data ActiveTab = Surface | TSP | Reservoir
-
-derive instance Eq ActiveTab
-
-data Action = SurfaceClicked | TSPClicked | ReservoirClicked
-type Output = Unit
+newtype Action = Clicked Algorithm
+newtype Output = Selected Algorithm
+newtype State = Current Algorithm
 
 tabArrayStyle :: CSS.StyleM Unit
 tabArrayStyle = do
@@ -35,16 +33,16 @@ buttonStyle = do
 
 component :: ∀ (m :: Type -> Type) (query :: Type -> Type) (a :: Type). H.Component query a Output m
 component = H.mkComponent
-  { initialState: const Surface
+  { initialState: const (Current Surface)
   , render: render
   , eval: H.mkEval $ H.defaultEval { handleAction = handleAction }
   }
   where
-  render :: forall slots. ActiveTab -> H.ComponentHTML Action slots m
-  render s = HH.div [ HCSS.style tabArrayStyle ]
-    [ mkButton Surface "2D Surface" SurfaceClicked
-    , mkButton TSP "Traveling Salesman" TSPClicked
-    , mkButton Reservoir "Reservoir computer" ReservoirClicked
+  render :: forall slots. State -> H.ComponentHTML Action slots m
+  render (Current s) = HH.div [ HCSS.style tabArrayStyle ]
+    [ mkButton Surface "2D Surface" (Clicked Surface)
+    , mkButton TSP "Traveling Salesman" (Clicked TSP)
+    , mkButton Reservoir "Reservoir computer" (Clicked Reservoir)
     ]
     where
     mkButton tab title action =
@@ -54,8 +52,7 @@ component = H.mkComponent
         ]
         [ HH.text title ]
 
-handleAction :: forall slots m. Action -> H.HalogenM ActiveTab Action slots Output m Unit
-handleAction = case _ of
-  SurfaceClicked -> H.modify_ \_ -> Surface
-  TSPClicked -> H.modify_ \_ -> TSP
-  ReservoirClicked -> H.modify_ \_ -> Reservoir
+handleAction :: forall slots m. Action -> H.HalogenM State Action slots Output m Unit
+handleAction (Clicked alg) = do
+  H.modify_ <<< const $ Current alg
+  H.raise (Selected alg)

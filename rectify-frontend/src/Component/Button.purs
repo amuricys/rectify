@@ -7,10 +7,11 @@ import Data.Show.Generic (genericShow)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
+import RunCommand (RunCommand(..))
 
 -- Define message and state types
 data Action = PauseClicked | StepClicked
-data Output = SendPause | SendUnpause | SendStep
+newtype Output = Send RunCommand
 data ServerState = Running | Paused
 
 derive instance Generic ServerState _
@@ -42,12 +43,12 @@ handleAction = case _ of
     case serverState of
       Running -> do
         H.modify_ _ { serverState = Paused }
-        H.raise $ SendPause
+        H.raise $ Send Pause
       Paused -> do
         H.modify_ _ { serverState = Running }
-        H.raise $ SendUnpause
+        H.raise $ Send Unpause
   StepClicked -> do
-    H.raise $ SendStep
+    H.raise $ Send Step
 
 -- resp <- liftAff $ AX.post
 --     AXW.driver

@@ -46,12 +46,11 @@ wsConsumer query = CR.consumer \msg -> do
 
 wsSender :: WS.WebSocket -> Parent.Output -> Effect Unit
 wsSender socket = case _ of
-  Parent.SendPause ->
-    WS.sendString socket "pause"
-  Parent.SendUnpause ->
-    WS.sendString socket "unpause"
-  Parent.SendStep ->
-    WS.sendString socket "step"
+  Parent.SendRunCommand cmd ->
+    WS.sendString socket (show cmd)
+  Parent.SendAlgorithmChange alg ->
+    WS.sendString socket (show alg)
+
 
 main :: Effect Unit
 main = do
