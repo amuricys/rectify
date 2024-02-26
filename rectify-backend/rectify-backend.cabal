@@ -63,7 +63,9 @@ library
       Surface.LinAlg
       Surface.Circular
       Surface.Index
+      TSP.Problem
   other-modules:
+      Helpers
   build-depends:    
       base
     -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified

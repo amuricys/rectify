@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Surface.Index where
 
 import Prelude
@@ -7,6 +8,7 @@ import Data.Aeson
 import Data.Finite ( Finite, finite, getFinite )
 import Data.Proxy
 import Data.Functor.Contravariant (contramap)
+import Data.Functor.Compose (Compose)
 
 type Index i = Finite i
 

@@ -36,6 +36,7 @@ import Servant.API.WebSocket (WebSocketPending)
 import SimulatedAnnealing (Algorithm (..), Problem (..), SimState (..), problemToInitialSimState, step)
 import UnliftIO.Concurrent (forkIO, yield)
 import Prelude
+import TSP.Problem (allCities, tspProblem)
 
 -- Define a type for your API
 type ServantType =
@@ -56,7 +57,7 @@ instance FromJSON MyResponse
 
 instance ToJSON MyResponse
 
-data RunState = Paused | Running | Stepping
+data RunState = Paused | Running | Stepping | ChangingAlgorithm
   deriving (Eq, Show, Generic)
 
 data State = State {currentAlgorithm :: Algorithm, runState :: RunState}
@@ -88,14 +89,20 @@ wsApp pending = liftIO $ do
   handleAndSend ctx
   where
     handleAndSend ctx = do
-      -- Handle client messages in a new thread
-      _ <- forkIO $ finally (handleClientMessages ctx) (putStrLn "Client disconnected")
+      let surfaceProblem = Problem.surfaceProblem @250 @250 @7 200 5
+          tspProb = tspProblem @30 100 allCities
+          initialSurface = problemToInitialSimState surfaceProblem seed
+          initialTSP = problemToInitialSimState tspProb seed
+          initialReservoir = problemToInitialSimState surfaceProblem seed
+          asStr = encode initialSurface
+      -- Send the initial state to the client
+      liftIO $ sendTextData ctx.conn asStr
       -- Handle each problem in a separate thread
-      _ <- forkIO $ serverSendMessage Surface (Problem.surfaceProblem @250 @250 @7 200 5) ctx
-      _ <- forkIO $ serverSendMessage TSP (Problem.surfaceProblem @250 @250 @7 200 5) ctx
-      _ <- forkIO $ serverSendMessage Reservoir (Problem.surfaceProblem @250 @250 @7 200 5) ctx
-      -- The main thread then does nothing
-      yield
+      _ <- forkIO $ serverSendMessage Surface surfaceProblem initialSurface ctx
+      _ <- forkIO $ serverSendMessage TSP tspProb initialTSP ctx
+      _ <- forkIO $ serverSendMessage Reservoir surfaceProblem initialReservoir ctx
+      -- Handle client messages in a new thread
+      finally (handleClientMessages ctx) (putStrLn "Client disconnected")
 
 -- TODO: Associate Algorithm type with Problem somehow, so that it becomes
 -- impossible to call this function with a TSP with the wrong Problem record.
@@ -105,12 +112,13 @@ serverSendMessage ::
   ToJSON solution =>
   Algorithm ->
   Problem metric beta solution ->
+  SimState metric solution ->
   Ctx ->
   IO ()
-serverSendMessage thisThreadsAlgorithm problem Ctx {stateVar, conn} =
-  loop stateVar conn problem (problemToInitialSimState problem seed)
+serverSendMessage thisThreadsAlgorithm problem simState Ctx {stateVar, conn} =
+  loop stateVar conn simState
   where
-    loop stateVar conn problem simState = do
+    loop stateVar conn simState = do
       -- Try reading from the shared state variable - if this thread's algorithm is not the
       -- one in the state variable, or the state is Paused, force another read to run by yielding
       -- If it's Running or Stepping, perform one step and send its result to the client.
@@ -132,9 +140,14 @@ serverSendMessage thisThreadsAlgorithm problem Ctx {stateVar, conn} =
               Running -> do
                 let next = step problem simState
                     asStr = encode next
-                liftIO $ sendTextData conn asStr
+                sendTextData conn asStr
                 pure next
-      loop stateVar conn problem next
+              ChangingAlgorithm -> do
+                let asStr = encode simState
+                liftIO $ sendTextData conn asStr
+                atomically $ modifyTVar stateVar (\s -> s {runState = Paused})
+                pure simState
+      loop stateVar conn next
 
 handleClientMessages :: Ctx -> IO ()
 handleClientMessages Ctx {stateVar, conn} = do
@@ -155,13 +168,13 @@ handleClientMessages Ctx {stateVar, conn} = do
         atomically $ modifyTVar stateVar (\s -> s {runState = Paused})
       (Text "Surface" _, State _ _) -> do
         putStrLn "Starting Surface"
-        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = Surface}
+        atomically $ writeTVar stateVar State {runState = ChangingAlgorithm, currentAlgorithm = Surface}
       (Text "TSP" _, State _ _) -> do
         putStrLn "Starting TSP"
-        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = TSP}
+        atomically $ writeTVar stateVar State {runState = ChangingAlgorithm, currentAlgorithm = TSP}
       (Text "Reservoir" _, State _ _) -> do
         putStrLn "Starting Reservoir"
-        atomically $ writeTVar stateVar State {runState = Paused, currentAlgorithm = Reservoir}
+        atomically $ writeTVar stateVar State {runState = ChangingAlgorithm, currentAlgorithm = Reservoir}
       _ -> pure ()
 
 -- Run the Warp server on port 8080

@@ -55,12 +55,13 @@ instance ToJSON a => ToJSON (Vector n a) where
 
 instance (ToJSON op, ToJSON ip) => ToJSON (Surface op ip) where
   toJSON :: (ToJSON op, ToJSON ip) => Surface op ip -> Value
-  toJSON (Surface outer inner) =
-    Object $
-      fromList
-        [ ("outer", toJSON outer),
-          ("inner", toJSON inner)
-        ]
+  toJSON (Surface outer inner) = Object $ fromList [("tag", "SurfaceSolution"), ("values", toJSON [vals])]
+    where
+      vals = Object $
+        fromList
+          [ ("outer", toJSON outer),
+            ("inner", toJSON inner)
+          ]
 
 data Change = Change
   { xChange :: X,

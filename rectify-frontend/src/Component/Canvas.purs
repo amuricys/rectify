@@ -2,19 +2,12 @@ module Component.Canvas where
 
 import Prelude
 
+import Algorithm (Algorithm)
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
-import Data.Argonaut.Decode (decodeJson)
-import Data.Argonaut.Parser (jsonParser)
-import Data.Array (length, zip, (..))
-import Data.Array as Array
-import Data.Bifunctor (lmap)
-import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Data.Tuple (Tuple(..))
 import Diagram as Diagram
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Console (log)
 import GoJS.Diagram (Diagram_, _model)
 import GoJS.Model (mergeLinkDataArray_, mergeNodeDataArray_)
 import Halogen as H
@@ -29,60 +22,33 @@ data SimState solution metric = SimState
   , currentBeta :: Int
   , currentFitness :: metric
   }
-
+type DiagramData = {nodes:: Array (Record Diagram.NodeData), links:: Array (Record Diagram.LinkData)}
 data Action = Initialize
-data Query a = ReceiveSimState String a
-type CanvasState = { diagram :: Maybe Diagram_ }
+data Query a = ReceiveSimState DiagramData a | AlgorithmChange DiagramData Algorithm a
+data CanvasState = SurfaceDiagram Diagram_ | TSPDiagram Diagram_ | NoDiagramYet
 
-type Solution =
-  { inner :: Array BackendPoint
-  , outer :: Array BackendPoint
-  }
+updateDiagram :: forall output m a. MonadEffect m => Diagram_ -> DiagramData -> a -> H.HalogenM CanvasState Action () output m (Maybe a)
+updateDiagram diagram { nodes, links } a = do
+  let m = diagram # _model 
+  liftEffect $ m # mergeNodeDataArray_ nodes
+  liftEffect $ m # mergeLinkDataArray_ links
+  pure (Just a)
 
-type BackendSimState sol =
-  { currentBeta :: Int
-  , currentFitness :: Number
-  , currentSolution :: sol
-  }
-
-type BackendPoint = { x :: Number, y :: Number }
-
-fromSolution :: Solution -> { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
-fromSolution { outer, inner } =
-  { nodes: Array.concat
-      [ map (toPoint "Outer" 0) (zip (0 .. length outer) outer)
-      , map (toPoint "Inner" outerLength) (zip (0 .. length inner) inner)
-      ]
-  , links: Array.concat
-      [ map (toLink "Outer" 0 (length outer - 1)) (0 .. (length outer - 1))
-      , map (toLink "Inner" (length outer) (length outer + length inner - 1)) (length outer .. (length outer + length inner - 1))
-      ]
-  }
-  where
-  outerLength = length outer
-  toLink cat first last i = { key: i, from: i, to: if i /= last then i + 1 else first, category: cat }
-  toPoint cat idplus (Tuple id p) = { key: idplus + id, loc: show p.x <> " " <> show p.y, category: cat }
-
-parse :: String -> Either String { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
-parse = pure <<< fromSolution <<< _.currentSolution <=< lmap show <<< decodeJson @(BackendSimState Solution) <=< jsonParser
-
-handleQuery :: forall m output a. MonadEffect m => Query a -> H.HalogenM CanvasState Action () output m (Maybe a)
+handleQuery :: forall m a. MonadEffect m => Query a -> H.HalogenM CanvasState Action () Void m (Maybe a)
 handleQuery = case _ of
+  -- Here we'll talk to GoJS
+  AlgorithmChange initialState alg a -> do
+    initDiagram initialState alg
+    pure $ Just a
   ReceiveSimState msg a -> do
-    -- Here we'll talk to GoJS
-    { diagram } <- H.get
-    case diagram <#> _model, parse msg of
-      Just m, Right { nodes, links } -> do
-        liftEffect $ m # mergeNodeDataArray_ nodes
-        liftEffect $ m # mergeLinkDataArray_ links
-        pure (Just a)
-      _, Left err -> liftEffect (log err) *> pure (Just a)
-      _, _ -> do
-        pure $ Just a
+    H.get >>= case _ of
+      SurfaceDiagram d -> updateDiagram d msg a
+      TSPDiagram d -> updateDiagram d msg a
+      NoDiagramYet -> pure $ Just a
 
 component :: forall input m. MonadEffect m => H.Component Query input Void m
 component = H.mkComponent
-  { initialState: const { diagram: Nothing }
+  { initialState: const NoDiagramYet
   , render
   , eval: H.mkEval $ H.defaultEval
       { handleAction = handleAction
@@ -105,8 +71,14 @@ component = H.mkComponent
       ]
       []
 
+initDiagram :: forall m. MonadEffect m => DiagramData -> Algorithm -> H.HalogenM CanvasState Action () Void m Unit
+initDiagram initialState alg = do
+  -- TODO: 1. Clear existing diagram before this, then 2. Make different diagram for different algorithms
+  d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.diag initialState.nodes initialState.links)
+  H.modify_ <<< const $ SurfaceDiagram d
+
 handleAction :: forall slots m. MonadEffect m => Action -> H.HalogenM CanvasState Action slots Void m Unit
 handleAction = case _ of
   Initialize -> do
     d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.diag [] [])
-    H.modify_ \s -> s { diagram = Just d }
+    H.modify_ <<< const $ SurfaceDiagram d

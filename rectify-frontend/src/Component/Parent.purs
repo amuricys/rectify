@@ -48,9 +48,12 @@ component =
     }
 
 handleQuery :: forall m output q a. Query a -> H.HalogenM ComponentState Action (Slots q) output m (Maybe a)
-handleQuery = case _ of
-  CanvasQuery (Canvas.ReceiveSimState str a) -> do
+handleQuery (CanvasQuery q) = case q of
+  Canvas.ReceiveSimState str a -> do
     H.tell _canvas inds.canvas (Canvas.ReceiveSimState str)
+    pure (Just a)
+  Canvas.AlgorithmChange initialState alg a -> do
+    H.tell _canvas inds.canvas (Canvas.AlgorithmChange initialState alg)
     pure (Just a)
 
 type Slots q =
@@ -78,4 +81,5 @@ render _ =
 handleAction :: forall slots m. MonadAff m => Action -> H.HalogenM ComponentState Action slots Output m Unit
 handleAction = case _ of
   RunAction cmd -> H.raise $ SendRunCommand cmd
-  AlgorithmChangeAction alg -> H.raise $ SendAlgorithmChange alg
+  AlgorithmChangeAction alg -> do
+    H.raise $ SendAlgorithmChange alg

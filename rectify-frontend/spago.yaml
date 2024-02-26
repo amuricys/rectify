@@ -5,6 +5,7 @@ package:
     - affjax
     - affjax-web
     - argonaut-codecs
+    - argonaut-generic
     - console
     - coroutines
     - css
@@ -30,4 +31,3 @@ workspace:
       path: ../../went-stuff/purescript-went
     gojs:
       path: ../../went-stuff/purescript-gojs
-

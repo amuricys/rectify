@@ -22,7 +22,12 @@ type NodeData =
   , loc :: String
   )
 
-type LinkData = (key :: Int, from :: Int, to :: Int, category :: String)
+type LinkData =
+  ( key :: Int
+  , from :: Int
+  , to :: Int
+  , category :: String
+  )
 
 toolTipStyle :: forall p g. IsPanel p => String -> MakeGraphObject NodeData p g Unit
 toolTipStyle surf =

@@ -2,18 +2,22 @@ module Main where
 
 import Prelude
 
+import Backend (BackendSolution(..), parse)
 import Component.Canvas as Canvas
 import Component.Parent as Parent
 import Control.Coroutine as CR
 import Control.Coroutine.Aff as CRA
 import Control.Monad.Except (runExcept)
-import Data.Either (either)
+import Data.Argonaut.Decode (decodeJson)
+import Data.Argonaut.Encode (encodeJson)
+import Data.Either (Either(..), either)
 import Data.Foldable (for_)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Foreign (readString, unsafeToForeign)
 import GoJS.Debug (ffilog)
+import Halogen (liftEffect)
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.Subscription as HS
@@ -41,7 +45,10 @@ wsProducer socket = CRA.produce \emitter -> do
 
 wsConsumer :: (forall a. Parent.Query a -> Aff (Maybe a)) -> CR.Consumer String Aff Unit
 wsConsumer query = CR.consumer \msg -> do
-  void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveSimState msg
+  -- TODO: how do we parse a bunch of sum types sustainably?
+  case parse msg of
+    Right simState -> void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveSimState simState
+    Left err -> liftEffect $ ffilog err
   pure Nothing
 
 wsSender :: WS.WebSocket -> Parent.Output -> Effect Unit

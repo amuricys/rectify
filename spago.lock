@@ -591,6 +591,18 @@ packages:
         - prelude
         - strings
         - tailrec
+  argonaut-generic:
+    needed_by:
+      - rectify
+    package:
+      type: registry
+      version: 8.0.0
+      integrity: sha256-WCqRWoomRKg5BFZnGBS4k4SqBX84fy/X1aJzMyaIeP0=
+      dependencies:
+        - argonaut-codecs
+        - argonaut-core
+        - prelude
+        - record
   arraybuffer-types:
     needed_by:
       - rectify
@@ -1517,6 +1529,7 @@ packages:
         - affjax
         - affjax-web
         - argonaut-codecs
+        - argonaut-generic
         - console
         - coroutines
         - css

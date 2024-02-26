@@ -12,6 +12,7 @@ import Data.Bifunctor (first)
 import GHC.Generics (Generic)
 import System.Random (Random)
 import System.Random.SplitMix (SMGen, nextDouble)
+import Helpers (tap)
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
 newtype Probability = Probability {unProbability :: Double}
