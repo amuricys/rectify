@@ -1,12 +1,12 @@
 {
   "scripts": {
     "bundle": "spago bundle",
-    "serve": "parcel index.html --open watch"
-    },
+    "serve": "parcel serve index.html --open"
+  },
   "dependencies": {
-      "gojs": "^2.3.11"
-    },
+    "gojs": "^2.3.11"
+  },
   "devDependencies": {
-    "parcel": "^2.8.3"
+    "parcel": "^2.13.3"
   }
 }

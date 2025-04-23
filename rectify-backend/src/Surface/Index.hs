@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 module Surface.Index where
 
 import Prelude
@@ -36,3 +37,19 @@ add i j = finite $ (getFinite i + j) `mod` natVal (Proxy :: Proxy n)
 
 sub :: forall n. KnownNat n => Finite n -> Integer -> Finite n
 sub i j = finite $ (getFinite i - j) `mod` natVal (Proxy :: Proxy n)
+
+distCtrclkwise :: forall otherCtrclkwise i. KnownNat otherCtrclkwise => KnownNat i => Finite i -> Integer
+distCtrclkwise ind = let 
+  otherCtrclkwise = natVal (Proxy :: Proxy otherCtrclkwise) 
+  in
+  if otherCtrclkwise > getFinite ind
+    then getFinite ind + (natVal (Proxy :: Proxy i) - otherCtrclkwise)
+    else getFinite ind - otherCtrclkwise
+
+distClkwise :: forall otherClkwise i. KnownNat otherClkwise => KnownNat i => Finite i -> Integer
+distClkwise ind = let
+  otherClkwise = natVal (Proxy :: Proxy otherClkwise) 
+  in
+  if otherClkwise >= getFinite ind
+    then otherClkwise - getFinite ind
+    else natVal (Proxy :: Proxy i) + otherClkwise - getFinite ind

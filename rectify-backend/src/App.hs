@@ -16,7 +16,7 @@ import Network.Wai.Middleware.Cors
     simpleCorsResourcePolicy,
   )
 import Network.WebSockets (Connection, DataMessage (..), PendingConnection, acceptRequest, defaultConnectionOptions, forkPingThread, receiveDataMessage, sendDataMessage, sendTextData, withPingThread)
-import Problem (seed, surfaceProblem)
+import Surface.Problem (seed, surfaceProblem)
 import Servant
   ( Application,
     Context (EmptyContext, (:.)),
@@ -89,25 +89,25 @@ wsApp pending = liftIO $ do
   handleAndSend ctx
   where
     handleAndSend ctx = do
-      let surfaceProblem = Problem.surfaceProblem @250 @250 @7 200 5
-          tspProb = tspProblem @30 100 allCities
-          initialSurface = problemToInitialSimState surfaceProblem seed
-          initialTSP = problemToInitialSimState tspProb seed
-          initialReservoir = problemToInitialSimState surfaceProblem seed
+      let sp = surfaceProblem @250 @250 @7 200 5
+          tsp = tspProblem @30 100 allCities
+          initialSurface = problemToInitialSimState sp seed
+          initialTSP = problemToInitialSimState tsp seed
+          initialReservoir = problemToInitialSimState sp seed
           asStr = encode initialSurface
       -- Send the initial state to the client
       liftIO $ sendTextData ctx.conn asStr
       -- Handle each problem in a separate thread
-      _ <- forkIO $ serverSendMessage Surface surfaceProblem initialSurface ctx
-      _ <- forkIO $ serverSendMessage TSP tspProb initialTSP ctx
-      _ <- forkIO $ serverSendMessage Reservoir surfaceProblem initialReservoir ctx
+      _ <- forkIO $ serverSendMessage Surface sp initialSurface ctx
+      _ <- forkIO $ serverSendMessage TSP tsp initialTSP ctx
+      _ <- forkIO $ serverSendMessage Reservoir sp initialReservoir ctx
       -- Handle client messages in a new thread
       finally (handleClientMessages ctx) (putStrLn "Client disconnected")
 
 -- TODO: Associate Algorithm type with Problem somehow, so that it becomes
 -- impossible to call this function with a TSP with the wrong Problem record.
 serverSendMessage ::
-  Show metric =>
+  Show metric => Show beta =>
   ToJSON metric =>
   ToJSON solution =>
   Algorithm ->

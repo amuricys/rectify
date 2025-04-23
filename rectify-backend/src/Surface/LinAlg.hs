@@ -107,5 +107,6 @@ linesIntersection l =
     go x [] = x
     go x [_] = x
     go Nothing (l1 : l2 : ls) = case intersection l1 l2 of
+      -- Recurse on the head because ts is a list of tails
       Nothing -> go Nothing (l1 : ls)
       Just p -> Just p

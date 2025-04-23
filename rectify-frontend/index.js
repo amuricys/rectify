@@ -1,8 +1,8 @@
-code = require("./output/Main/index.js")
-// see https://parceljs.org/hmr.html
+import { main } from "./output/Main/index.js";
+
 if (module.hot) {
-  module.hot.accept(function() {
-    code.main();
+  module.hot.accept(() => {
+    main();
   });
 }
-code.main();
+main();

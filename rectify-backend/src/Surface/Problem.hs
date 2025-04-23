@@ -1,14 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DerivingStrategies #-}
 
-module Problem where
+module Surface.Problem where
 
 import Prelude
 
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.TypeLits (KnownNat, type (+), type (<=))
 import SimulatedAnnealing (Probability (Probability), Problem (..))
-import Surface (Surface (inner, outer, Surface), Thickness, circularSurface2D, modifySurf)
+import Surface.Surface (Surface (inner, outer, Surface), Thickness, circularSurface2D, modifySurf)
 import Surface.Circular (Radius (unRadius), area)
 import Surface.LinAlg (Point2D)
 import System.Random.SplitMix (SMGen, mkSMGen)

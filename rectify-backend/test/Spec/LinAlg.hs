@@ -55,11 +55,12 @@ prop_intersection = property $ do
       Nothing ->   -- if there's no intersection between these random points,
         success    -- we can't say anything, but
       Just p -> do -- if there is, such an intersection must be found by linesIntersection
-        annotateShow . toLines $ [p1, p2, p3, p4]
-        diff p fn $ linesIntersection (toLines [p1, p2, p3, p4])
+        let lines = [(p1, p2), (p2, p3), (p3, p4), (p4, p1)]
+        annotateShow lines
+        diff p fn $ linesIntersection lines
           where
             fn :: Point2D -> Maybe Point2D -> Bool
-            fn p  = maybe False (~== p)
+            fn p'  = maybe False (~== p')
 
 prop_crossProduct :: Property
 prop_crossProduct = property $ do

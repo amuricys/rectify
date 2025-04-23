@@ -63,7 +63,7 @@ isingAcceptance hu hv beta
     | di < 0    = Probability $ exp (negate (beta * di))
     | otherwise = 1
   where
-    di = pTraceShow beta $ hv - hu
+    di = hv - hu
 
 solutionToList :: (FinnRandoSolution n) -> [City]
 solutionToList (FinnRandoSolution xs) = V.toList xs

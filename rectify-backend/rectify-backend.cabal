@@ -58,8 +58,9 @@ library
   exposed-modules:
       App
       SimulatedAnnealing
-      Problem
-      Surface
+      Surface.Change
+      Surface.Surface
+      Surface.Problem
       Surface.LinAlg
       Surface.Circular
       Surface.Index
@@ -109,6 +110,7 @@ test-suite rectify-test
   hs-source-dirs: test
   other-modules:
     Spec.LinAlg
+    Spec.Surface.Change
   main-is: Main.hs
   build-depends:
       base
