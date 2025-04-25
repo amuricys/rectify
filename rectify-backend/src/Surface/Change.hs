@@ -1,19 +1,23 @@
-{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BlockArguments #-}
+
 module Surface.Change where
 
-import Prelude
-import Surface.LinAlg (X(..), Y(..), Point2D (Point2D), dist)
-import GHC.Generics (Generic)
-import qualified Data.Vector.Sized as V
-import GHC.TypeLits (KnownNat, type (+), natVal, CmpNat, SomeNat (SomeNat), OrderingI (LTI), cmpNat, someNatVal)
-import Data.Vector.Sized (Vector)
-import Surface.Index (Index)
-import Surface.Circular (Circular)
-import qualified Surface.Index as Index
-import Data.Proxy (Proxy(..))
-import Data.Finite (getFinite, finite)
+import Data.Finite (finite, getFinite)
 import Data.List (sortBy)
+import Data.Proxy (Proxy (..))
+import Data.Vector.Sized (Vector)
+import Data.Vector.Sized qualified as V
+import Debug.Pretty.Simple (pTrace, pTraceShow)
+import GHC.Generics (Generic)
+import GHC.TypeLits (CmpNat, KnownNat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+))
+import Helpers
+import Surface.Circular (Circular)
+import Surface.Index (Index)
+import Surface.Index qualified as Index
+import Surface.LinAlg (Point2D (Point2D), X (..), Y (..), dist)
+import Prelude
+import qualified Data.Vector as Unsized
 
 data Change = Change
   { xChange :: X,
@@ -55,51 +59,59 @@ smooth i c fn = V.reverse backward V.++ V.singleton (i, c) V.++ forward
     forward = V.generate $ \ind -> (Index.add i (getFinite ind + 1), fn (getFinite ind) range c)
     backward = V.generate $ \ind -> (Index.sub i (getFinite ind + 1), fn (getFinite ind) range c)
 
-
-hmm :: Vector 11 (Index 20, Change)
-hmm = smooth @5 @20 5 Change {xChange = 0.0, yChange = 10.0} linear
-
 -- newtype Stitching i = Stitching {unStitching :: Map.Map (Index i) (Unsized.Vector (Index i, Double, Double))}
 --   deriving newtype (Show, Eq)
 
-
--- | Given a point, a vector of changes paired with their target vertices and a graph, 
+-- | Given a point, a vector of changes paired with their target vertices and a graph,
 -- this function returns a change that is the average of the `n` changes whose
 -- vertex targets are closest to the point.
-avgChangeForClosest :: forall n mostCtr mostClk m o i. 
-  KnownNat n =>
-  KnownNat i =>
-  KnownNat mostCtr =>
-  KnownNat mostClk =>
+avgChangeForClosest ::
+  forall n mostCtr mostClk m o i.
+  (KnownNat n) =>
+  (KnownNat i) =>
+  (KnownNat mostCtr) =>
+  (KnownNat mostClk) =>
   Index i ->
   Point2D ->
-  Vector m (Index o, Change) -> Circular o -> Change
+  Vector m (Index o, Change) ->
+  Circular o ->
+  Change
 avgChangeForClosest i p outerChanges g =
   let changesAsList = V.toList outerChanges
       sorted = snd <$> take (fromIntegral avgOf) (sortBy sorter changesAsList)
    in avg sorted
   where
     sorter (i1, _) (i2, _) = compare (dist (g `V.index` i1) p) (dist (g `V.index` i2) p)
-    avgOf = minimum [natVal (Proxy @n),
-                     Index.distClkwise @mostClk i,
-                     Index.distCtrclkwise @mostCtr i]
+    avgOf =
+      minimum
+        [ natVal (Proxy @n),
+          Index.distClkwise @mostClk i,
+          Index.distCtrclkwise @mostCtr i
+        ]
     avg :: [Change] -> Change
-    avg = scaleChange (1 / fromIntegral avgOf) . foldl (<>) mempty
+    avg = scaleChange (1 / fromIntegral (if avgOf == 0 then pTraceShow "whatuthinkin" 1 else avgOf)) . foldl (<>) mempty
 
 data LessThan i where
   LessThan :: forall n m i. (KnownNat n, CmpNat n i ~ LT) => Proxy n -> LessThan i
 
-lessThan :: forall n. KnownNat n => Index n -> LessThan n
+instance Show (LessThan i) where
+  show (LessThan p) = show (natVal p)
+
+lessThan :: forall n. (KnownNat n) => Index n -> LessThan n
 lessThan i = case someNatVal (getFinite i) of
   Just (SomeNat (_ :: Proxy i)) -> case cmpNat (Proxy @i) (Proxy @n) of
     LTI -> LessThan @i @n Proxy
     _ -> error "Index contained integer larger than its bound"
   Nothing -> error "Index contained negative integer"
 
+-- >>> lessThan @7 
+-- 6
+
 -- TODO: Partition-optimize.
+
 -- | Given two points and a circular graph, this function returns the indices of the two nodes
 -- that are closest to the given points.
-closestInternalNodes :: forall m n nprev. KnownNat n => n ~ nprev + 1 => Point2D -> Point2D -> Circular n -> (LessThan n, LessThan n)
+closestInternalNodes :: forall m n nprev. (KnownNat n) => (n ~ nprev + 1) => Point2D -> Point2D -> Circular n -> (LessThan n, LessThan n)
 closestInternalNodes mostCtrclkwise mostClkwise inner = (closestNodeTo mostCtrclkwise, closestNodeTo mostClkwise)
   where
     closestNodeTo :: Point2D -> LessThan n
@@ -107,13 +119,13 @@ closestInternalNodes mostCtrclkwise mostClkwise inner = (closestNodeTo mostCtrcl
 
 pushInners ::
   forall avg o i n nprev oprev iprev.
-  KnownNat o =>
-  KnownNat i =>
-  KnownNat avg =>
-  o ~ oprev + 1 =>
-  i ~ iprev + 1 =>
-  n ~ nprev + 1 =>
-  n ~ 1 + nprev =>
+  (KnownNat o) =>
+  (KnownNat i) =>
+  (KnownNat avg) =>
+  (o ~ oprev + 1) =>
+  (i ~ iprev + 1) =>
+  (n ~ nprev + 1) =>
+  (n ~ 1 + nprev) =>
   Circular o ->
   Circular i ->
   Vector n (Index o, Change) ->
@@ -131,5 +143,13 @@ pushInners outer inner outerChanges =
 
 applyChange :: forall n. Vector n Point2D -> (Index n, Change) -> (Index n, Point2D)
 applyChange g (i, c) = (i, change (g `V.index` i) c)
-  where change :: Point2D -> Change -> Point2D
-        change (Point2D x y) (Change x' y') = Point2D (x + x') (y + y')
+  where
+    change :: Point2D -> Change -> Point2D
+    change (Point2D x y) (Change x' y') = Point2D (x + x') (y + y')
+
+addOrRemove ::
+  forall n.
+  Unsized.Vector (Index n, Point2D) ->
+  Unsized.Vector Point2D ->
+  Unsized.Vector Point2D
+addOrRemove v toAdd = undefined

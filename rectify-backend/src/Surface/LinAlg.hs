@@ -42,6 +42,15 @@ instance FromJSON Point2D
 
 instance ToJSON Point2D
 
+fromTuple :: (Double, Double) -> Point2D
+fromTuple (x, y) = Point2D (X x) (Y y)
+
+fromListRepeated :: [Double] -> [Point2D]
+fromListRepeated = map (\i -> Point2D (X i) (Y i))
+
+fromListEveryTwo :: [Double] -> [Point2D]
+fromListEveryTwo l = zipWith (\x y -> Point2D (X x) (Y y)) l (tail l)
+
 add :: Point2D -> Point2D -> Point2D
 add (Point2D (X x1) (Y y1)) (Point2D (X x2) (Y y2)) = Point2D (X $ x1 + x2) (Y $ y1 + y2)
 

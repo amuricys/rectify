@@ -2,14 +2,12 @@ module Main where
 
 import Prelude
 
-import Backend (BackendSolution(..), parse)
+import Backend (parse)
 import Component.Canvas as Canvas
 import Component.Parent as Parent
 import Control.Coroutine as CR
 import Control.Coroutine.Aff as CRA
 import Control.Monad.Except (runExcept)
-import Data.Argonaut.Decode (decodeJson)
-import Data.Argonaut.Encode (encodeJson)
 import Data.Either (Either(..), either)
 import Data.Foldable (for_)
 import Data.Maybe (Maybe(..))

@@ -13,6 +13,8 @@ import Surface.Circular (Radius (unRadius), area)
 import Surface.LinAlg (Point2D)
 import System.Random.SplitMix (SMGen, mkSMGen)
 import Data.Type.Ord (type (<))
+import Helpers
+import Debug.Pretty.Simple (pTraceShow)
 
 newtype Energy = Energy {unEnergy :: Double}
   deriving newtype (Show, Eq, Num, Ord, Fractional, FromJSON, ToJSON)
@@ -35,7 +37,7 @@ surfaceProblem ::
   Problem Energy Temperature (Surface Point2D Point2D)
 surfaceProblem radius thickness =
   let initialSurf = circularSurface2D @o @i 0 0 radius thickness
-      initialGrayMatterArea = case initialSurf of 
+      initialGrayMatterArea = case initialSurf of
         -- this pattern matching is needed so the constraints on outer and inner are brought into scope
         Surface outer inner -> area outer - area inner
    in Problem
@@ -48,7 +50,7 @@ surfaceProblem radius thickness =
 
 sched :: Integer -> Temperature
 sched i =
-  let progression = 1.0 - fromIntegral i / 200.0
+  let progression = 1000.0 - fromIntegral i / 200.0
    in if progression < 0.0
         then 0.0
         else Temperature progression
@@ -58,11 +60,13 @@ freeEnergy initialGrayMatter (Surface inner outer) = Energy $ whiteMatter + (1.0
   where
     whiteMatter = area inner
     grayMatter = abs $ area outer - whiteMatter
-    grayMatterStretch = abs $ (grayMatter - initialGrayMatter) ** 2.0
+    delta = grayMatter - initialGrayMatter
+    grayMatterStretch = abs (delta * delta)
 
 acceptanceProbability :: Energy -> Energy -> Temperature -> Probability
 acceptanceProbability energyState energyNeighbor temperature
   | energyNeighbor < energyState = 1.0
+  | temperature <= 0.0 = 1.0
   | otherwise = Probability $ exp (unEnergy (energyState - energyNeighbor) / unTemperature temperature)
 
 seed :: SMGen

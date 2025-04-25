@@ -3,6 +3,7 @@ module Component.Canvas where
 import Prelude
 
 import Algorithm (Algorithm)
+import Backend (DiagramData(..))
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import Data.Maybe (Maybe(..))
@@ -22,13 +23,12 @@ data SimState solution metric = SimState
   , currentBeta :: Int
   , currentFitness :: metric
   }
-type DiagramData = {nodes:: Array (Record Diagram.NodeData), links:: Array (Record Diagram.LinkData)}
 data Action = Initialize
 data Query a = ReceiveSimState DiagramData a | AlgorithmChange DiagramData Algorithm a
 data CanvasState = SurfaceDiagram Diagram_ | TSPDiagram Diagram_ | NoDiagramYet
 
 updateDiagram :: forall output m a. MonadEffect m => Diagram_ -> DiagramData -> a -> H.HalogenM CanvasState Action () output m (Maybe a)
-updateDiagram diagram { nodes, links } a = do
+updateDiagram diagram (DiagramData { nodes, links }) a = do
   let m = diagram # _model 
   liftEffect $ m # mergeNodeDataArray_ nodes
   liftEffect $ m # mergeLinkDataArray_ links
@@ -72,7 +72,7 @@ component = H.mkComponent
       []
 
 initDiagram :: forall m. MonadEffect m => DiagramData -> Algorithm -> H.HalogenM CanvasState Action () Void m Unit
-initDiagram initialState alg = do
+initDiagram (DiagramData initialState) _alg = do
   -- TODO: 1. Clear existing diagram before this, then 2. Make different diagram for different algorithms
   d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.diag initialState.nodes initialState.links)
   H.modify_ <<< const $ SurfaceDiagram d

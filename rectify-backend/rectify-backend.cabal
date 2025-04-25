@@ -74,6 +74,7 @@ library
     , aeson
     , generic-lens
     , lens
+    , vector
     , vector-sized
     , finite-typelits
     , random
@@ -87,6 +88,8 @@ library
     , servant
     , servant-server
     , servant-websockets
+    , singletons
+    , singletons-base
     , stm
     , unliftio
     , warp

@@ -13,7 +13,7 @@ import GHC.Generics (Generic)
 import System.Random (Random)
 import System.Random.SplitMix (SMGen, nextDouble)
 import Helpers (tap)
-import Debug.Pretty.Simple (pTrace)
+import Debug.Pretty.Simple (pTrace, pTraceShow)
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
 newtype Probability = Probability {unProbability :: Double}
@@ -71,8 +71,7 @@ step (Problem {initial, neighbor, fitness, schedule, acceptance}) s =
       -- The same generator is used for both the neighbor and the acceptance probability
       (nextGen', nghb) = neighbor nextGen (currentSolution s)
       nghbFitness = fitness nghb
-      accept = 1.0 -- acceptance s.currentSolution nghb s.currentFitness nghbFitness (schedule s.currentBeta)
-      
+      accept = acceptance s.currentSolution nghb s.currentFitness nghbFitness (schedule s.currentBeta)
       newBeta = currentBeta s + 1
    in if coinFlip <= accept
         then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta, gen = nextGen'}

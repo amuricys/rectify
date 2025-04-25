@@ -89,7 +89,7 @@ wsApp pending = liftIO $ do
   handleAndSend ctx
   where
     handleAndSend ctx = do
-      let sp = surfaceProblem @250 @250 @7 200 5
+      let sp = surfaceProblem @100 @100 @7 200 5
           tsp = tspProblem @30 100 allCities
           initialSurface = problemToInitialSimState sp seed
           initialTSP = problemToInitialSimState tsp seed
