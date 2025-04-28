@@ -28,7 +28,7 @@ import GHC.Generics (Generic)
 import GHC.TypeLits (CmpNat, KnownNat, Mod, Nat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+), type (-), type (<=?))
 import SimulatedAnnealing (Probability (..), Problem (..))
 import Surface.Change
-import Surface.Circular (Circular, Compression (Compression), Radius (..), circularGraph, maybeAddOnePoint, toCircularLines)
+import Surface.Circular (Circular, Compression (Compression), Radius (..), circularGraph, maybeAddOnePoint, toCircularLines, maybeRemoveOnePoint, AtLeastOneVector (AtLeastOneVector))
 import Surface.Index (Index)
 import Surface.Index qualified as Index
 import Surface.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection)
@@ -76,13 +76,13 @@ circularSurface2D centerx centery radius thickness =
     (circularGraph @o centerx centery radius)
     (circularGraph @i centerx centery (Radius $ unRadius radius - unThickness thickness))
 
-surfOutof :: forall o i oprev iprev. (o ~ oprev + 1, i ~ iprev + 1, KnownNat o, KnownNat i) => Vector o Point2D -> Vector i Point2D -> Surface Point2D Point2D
-surfOutof o i = case ( maybeAddOnePoint 10.0 o,  maybeAddOnePoint 10.0 i) of
-  -- This is needed because the case expression
-  (Left x, Left y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
-  (Left x, Right y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
-  (Right x, Left y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
-  (Right x, Right y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
+surfAdded :: forall o i oprev iprev. (o ~ oprev + 1, i ~ iprev + 1, KnownNat o, KnownNat i) => Vector o Point2D -> Vector i Point2D -> Surface Point2D Point2D
+surfAdded o i = case ( maybeAddOnePoint 10.0 o,  maybeAddOnePoint 10.0 i) of
+  (AtLeastOneVector x, AtLeastOneVector y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
+surfRemoved :: forall o i oprev iprev. (o ~ oprev + 1, i ~ iprev + 1, KnownNat o, KnownNat i) => Vector o Point2D -> Vector i Point2D -> Surface Point2D Point2D
+surfRemoved o i = case ( maybeRemoveOnePoint 0.5 o,  maybeRemoveOnePoint 0.5 i) of
+  (AtLeastOneVector x, AtLeastOneVector y) -> pTraceShow ("ol: " <> show (V.length x) <> ", il: " <> show (V.length y)) Surface x y
+
 
 --------- Modification
 modifySurf ::
@@ -104,12 +104,18 @@ modifySurf (high, low) gen s@(Surface (outer :: Vector o Point2D) (inner :: Vect
       -- Apply the changes first so that detecting intersections is easier
       appliedOuter = outer // (applyChange outer <$> V.toList smoothedOuterChanges)
       appliedInner = inner // (applyChange inner <$> smoothedInnerChanges)
-   in case linesIntersection . V.toList $ toCircularLines appliedOuter ++ toCircularLines appliedInner of
-        Just p ->
-          ( newgen'',
-            surfOutof outer inner
-          )
-        Nothing ->
-          ( newgen'',
-            surfOutof appliedOuter appliedInner
-          )
+   in 
+    -- The removal of points may cause intersections, but the not the addition.
+    -- That's why this is organized the way it is. If no intersections are found,
+    -- we call maybeAddSurf
+    case surfRemoved appliedOuter appliedInner of
+      (Surface outer' inner') ->
+        case linesIntersection . V.toList $ toCircularLines outer' ++ toCircularLines inner' of
+            Just p ->
+              ( newgen'',
+                s
+              )
+            Nothing ->
+              ( newgen'',
+                surfAdded outer' inner'
+              )

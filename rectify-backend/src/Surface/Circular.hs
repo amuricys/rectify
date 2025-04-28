@@ -7,19 +7,13 @@
 module Surface.Circular where
 
 import Data.Aeson (FromJSON, ToJSON)
-import Data.Finite (Finite, getFinite)
+import Data.Finite (Finite, finite, getFinite)
 import Data.Finite.Integral (weaken)
--- SNat, Sing, withSomeSing
--- Σ-type (:@:) and (:&:)
-
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
-import Data.Singletons
-import Data.Singletons.Sigma
 import Data.Type.Equality ((:~:) (Refl))
-import Data.Type.Ord (OrderingI (..))
-import Data.Vector qualified as Unsized
-import Data.Vector.Sized (Vector, generate, index, (++))
+import Data.Type.Ord (OrderingI (..), type (<), type (>), type (<=))
+import Data.Vector.Sized (Vector, generate, index, (++), (//))
 import Data.Vector.Sized qualified as V
 import Debug.Pretty.Simple (pTraceShow)
 import GHC.TypeLits
@@ -35,9 +29,8 @@ import GHC.TypeLits
 import GHC.TypeNats (natVal, sameNat, someNatVal)
 import Surface.Index (next, prev)
 import Surface.Index qualified as Index
-import Surface.LinAlg (Line, Point2D (..), X (..), Y (..), add, dist, scalarMult)
+import Surface.LinAlg ( Line, Point2D(..), Y(..), X(..), add, scalarMult, dist )
 import System.Random (Random)
-import Unsafe.Coerce (unsafeCoerce)
 import Prelude hiding ((++))
 
 type Circular i = Vector i Point2D
@@ -68,15 +61,21 @@ area v =
     indices :: Vector n (Finite n)
     indices = generate id
 
-addPoint :: forall i n m. (KnownNat n, KnownNat i, n ~ i + m) => Point2D -> Circular n -> Circular (1 + n)
-addPoint p g = convert $ V.take @i g ++ V.cons p (V.drop @i g)
-  where
-    -- Valid because of the constraint n ~ i + m. Just to avoid algebraic manipulation stuff
-    convert :: Circular (i + (1 + m)) -> Circular (1 + n)
-    convert = unsafeCoerce
-
 toCircularLines :: (KnownNat n) => Vector n Point2D -> Vector n Line
 toCircularLines ps = generate $ \i -> (ps `index` i, ps `index` Index.next i)
+
+data AtLeastOneVector n rel
+  = forall m mprev.
+    (KnownNat m, m ~ mprev + 1, (rel m n)) =>
+    AtLeastOneVector (Vector m Point2D)
+
+deriving instance Show (AtLeastOneVector n rel)
+
+class GtBy x n m
+instance (n - m <= x) => GtBy x n m
+
+class LtBy x n m
+instance (m - n <= x) => LtBy x n m
 
 maybeAddOnePoint ::
   forall n nprev.
@@ -84,7 +83,7 @@ maybeAddOnePoint ::
   (n ~ nprev + 1) =>
   Double ->
   Vector n Point2D ->
-  Either (Vector (n + 1) Point2D) (Vector n Point2D)
+  AtLeastOneVector n (GtBy 1) -- could parametrize if we want to add several at once
 maybeAddOnePoint threshold v =
   case V.findIndex (\(p, idx) -> dist p (v `index` Index.next idx) > threshold) (V.zip v $ V.generate id) of
     Just idx -> case someNatVal . fromInteger . getFinite $ idx of
@@ -93,6 +92,58 @@ maybeAddOnePoint threshold v =
                                        ) of
         (Just Refl, LTI) ->
           let (p1, p2) = (v `index` idx, v `index` Index.next idx)
-           in Left $ V.take @(i + 1) v ++ V.cons (p1 `add` p2 `scalarMult` 0.5) (V.drop @(i + 1) v)
+              midpoint = p1 `add` p2 `scalarMult` 0.5
+              v' :: Vector (n + 1) Point2D
+              v' = V.take @(i + 1) v ++ V.cons midpoint (V.drop @(i + 1) v)
+           in AtLeastOneVector v'
         _ -> error "impossible"
-    Nothing -> Right v
+    Nothing -> AtLeastOneVector v
+
+data Exists n = forall m. m + 1 ~ n => Exists
+
+maybeRemoveOnePoint ::
+  forall n nprev.
+  (KnownNat n) =>
+  (n ~ nprev + 1) =>
+  Double ->
+  Vector n Point2D ->
+  AtLeastOneVector n (LtBy 1) -- could parametrize if we want to remove several at once
+maybeRemoveOnePoint threshold v =
+  case V.findIndex (\(p, idx) -> dist p (v `index` Index.prev idx) < threshold) (V.zip v $ V.generate id) of
+    Just idx -> case someNatVal . fromInteger . getFinite $ idx of
+      (SomeNat (_ :: Proxy i)) -> case ( cmpNat (Proxy @n) (Proxy @1), -- needed to guarantee the result is still non-empty
+                                         sameNat (Proxy @(i + (n - i))) (Proxy @n), -- needed for take
+                                         sameNat (Proxy @((i + 1) + (n - (i + 1)))) (Proxy @n), -- needed for drop
+                                         cmpNat (Proxy @i) (Proxy @n) -- needed to guarantee we can take
+                                       ) of
+        (EQI, _, _, _) -> AtLeastOneVector v
+        (GTI, Just Refl, Just Refl, LTI) ->
+          let (p1, p2) = (v `index` Index.prev idx, v `index` idx)
+              midpoint = p1 `add` p2 `scalarMult` 0.5
+              -- Auxiliary proofs
+              less :: i < n => n - (i + 1) :~: n - i - 1
+              less = Refl
+              eq :: i < n => i + (n - i - 1) :~: n - 1
+              eq = Refl
+              greaterthan1 :: forall m. n > 1 => Exists nprev
+              greaterthan1 = Exists @nprev @(nprev - 1)
+              -- First the modified existing index
+              v' = v // [(Index.prev . finite . fromIntegral $ natVal (Proxy @i), midpoint)]
+              -- Then simplified vector lengths
+              v'' :: Vector i Point2D
+              v'' = V.take @i v'
+              v''' :: Vector (n - i - 1) Point2D 
+              v''' = case eq of 
+                Refl -> V.drop @(i + 1) v'
+              v'''' :: Vector nprev Point2D
+              v'''' = case Refl of
+                Refl -> v'' ++ v'''
+           -- Finally we bring into scope evidence
+           -- that there exists an m such that nprev = m + 1
+           in case greaterthan1 of
+            Exists -> AtLeastOneVector v''''
+        _ -> error ("impossible: " <> show (natVal $ Proxy @i) <> ", " <> show (natVal $ Proxy @nprev) <> ", ")
+    Nothing -> AtLeastOneVector v
+
+-- >>> maybeRemoveOnePoint 0.6 (fromJust $ V.fromList @4 (fromListRepeated [10.0, 10.02, 13.5, 9.0]))
+-- AtLeastOneVector (Vector [Point2D {x = 10.01, y = 10.01},Point2D {x = 13.5, y = 13.5},Point2D {x = 9.0, y = 9.0}])
