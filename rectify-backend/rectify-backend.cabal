@@ -67,6 +67,11 @@ library
       TSP.Problem
   other-modules:
       Helpers
+  ghc-options:
+       -fplugin GHC.TypeLits.KnownNat.Solver
+       -fplugin GHC.TypeLits.Presburger
+       -fplugin GHC.TypeLits.Normalise
+
   build-depends:    
       base
     -- hmatrix breaks with the old missing blas, lapack in nix develop if an MTL version is specified
@@ -76,6 +81,10 @@ library
     , lens
     , vector
     , vector-sized
+    , singletons-presburger
+    , ghc-typelits-knownnat
+    , ghc-typelits-presburger
+    , ghc-typelits-natnormalise
     , finite-typelits
     , random
     -- This is chosen because it's fast to generate random numbers

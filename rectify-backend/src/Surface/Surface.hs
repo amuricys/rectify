@@ -76,23 +76,6 @@ circularSurface2D centerx centery radius thickness =
     (circularGraph @o centerx centery radius)
     (circularGraph @i centerx centery (Radius $ unRadius radius - unThickness thickness))
 
-withSurface ::
-  Surface outer inner ->
-  ( forall o i.
-    (KnownNat o, KnownNat i) =>
-    Vector o outer ->
-    Vector i inner ->
-    r
-  ) ->
-  r
-withSurface (Surface out inn) f = f out inn
-
-dirtyfmap :: (c a) => (c b) => (forall a. (c a) => a -> d) -> Either a b -> d
-dirtyfmap f e = case e of
-  Left x -> f x
-  Right x -> f x
-
-
 surfOutof :: forall o i oprev iprev. (o ~ oprev + 1, i ~ iprev + 1, KnownNat o, KnownNat i) => Vector o Point2D -> Vector i Point2D -> Surface Point2D Point2D
 surfOutof o i = case ( maybeAddOnePoint 10.0 o,  maybeAddOnePoint 10.0 i) of
   -- This is needed because the case expression

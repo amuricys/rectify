@@ -104,8 +104,6 @@ lessThan i = case someNatVal (getFinite i) of
     _ -> error "Index contained integer larger than its bound"
   Nothing -> error "Index contained negative integer"
 
--- >>> lessThan @7 
--- 6
 
 -- TODO: Partition-optimize.
 
