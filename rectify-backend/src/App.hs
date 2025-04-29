@@ -111,7 +111,7 @@ serverSendMessage ::
   ToJSON metric =>
   ToJSON solution =>
   Algorithm ->
-  Problem metric beta solution ->
+  Problem es metric beta solution ->
   SimState metric solution ->
   Ctx ->
   IO ()

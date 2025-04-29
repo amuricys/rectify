@@ -1,30 +1,33 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module SimulatedAnnealing where
-
-import Prelude
 
 import Data.Aeson (ToJSON (toJSON), Value (Object))
 import Data.Aeson.KeyMap (fromList)
 import Data.Bifunctor (first)
-import GHC.Generics (Generic)
-import System.Random (Random)
-import System.Random.SplitMix (SMGen, nextDouble)
-import Helpers (tap)
 import Debug.Pretty.Simple (pTrace, pTraceShow)
+import Effectful
+import Effectful.Dispatch.Dynamic
+import Effectful.State.Static.Local (evalState)
+import Effectful.TH (makeEffect)
+import GHC.Generics (Generic)
+import Helpers (tap)
+import Random
+import Prelude
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
 newtype Probability = Probability {unProbability :: Double}
-  deriving newtype (Show, Eq, Num, Ord, Fractional, Random)
+  deriving newtype (Show, Eq, Num, Ord, Fractional)
 
 data Algorithm = Surface | TSP | Reservoir
   deriving (Eq, Show, Generic)
 
-data Problem metric beta solution = Problem
-  { initial :: SMGen -> solution,
-    neighbor :: SMGen -> solution -> (SMGen, solution),
+data Problem es metric beta solution = Problem
+  { initial :: solution,
+    neighbor :: solution -> Eff es solution,
     fitness :: solution -> metric,
     schedule :: Integer -> beta, -- temperature schedule; list of betas represented as fn
     acceptance ::
@@ -33,16 +36,21 @@ data Problem metric beta solution = Problem
       metric ->
       metric ->
       beta ->
-      Probability
+      Eff es Probability
   }
 
 data SimState metric solution = SimState
   { currentSolution :: solution,
     currentFitness :: metric,
-    currentBeta :: Integer,
-    gen :: SMGen
+    currentBeta :: Integer
   }
   deriving (Show, Generic)
+
+data SAEff :: Effect where
+  Step :: SimState metric solution -> SAEff m (SimState metric solution)
+
+makeEffect ''SAEff
+
 instance (Eq metric, Eq solution) => Eq (SimState metric solution) where
   (==) a b = currentSolution a == currentSolution b && currentFitness a == currentFitness b && currentBeta a == currentBeta b
 
@@ -56,23 +64,29 @@ instance (ToJSON metric, ToJSON solution) => ToJSON (SimState metric solution) w
           ("currentBeta", toJSON currentBeta)
         ]
 
-problemToInitialSimState :: Problem metric beta solution -> SMGen -> SimState metric solution
-problemToInitialSimState problem seed = let
-  is = problem.initial seed
-  f = problem.fitness is
-  in SimState {currentSolution = is, currentFitness = f, currentBeta = 0, gen = seed}
+problemToInitialSimState :: Problem es metric beta solution -> SimState metric solution
+problemToInitialSimState problem =
+  let is = problem.initial
+      f = problem.fitness is
+   in SimState {currentSolution = is, currentFitness = f, currentBeta = 0}
 
-step :: Show metric => Show beta =>
-  Problem metric beta solution ->
-  SimState metric solution ->
-  SimState metric solution
-step (Problem {initial, neighbor, fitness, schedule, acceptance}) s =
-  let (coinFlip, nextGen) = first Probability $ nextDouble (gen s)
-      -- The same generator is used for both the neighbor and the acceptance probability
-      (nextGen', nghb) = neighbor nextGen (currentSolution s)
-      nghbFitness = fitness nghb
-      accept = acceptance s.currentSolution nghb s.currentFitness nghbFitness (schedule s.currentBeta)
-      newBeta = currentBeta s + 1
-   in if coinFlip <= accept
-        then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta, gen = nextGen'}
-        else s {currentBeta = newBeta, gen = nextGen'}
+runSAPure ::
+  (Show metric) =>
+  (Show beta) =>
+  (RandomEff :> es) =>
+  Problem es metric beta solution ->
+  Eff (SAEff : es) (SimState metric solution) ->
+  Eff es (SimState metric solution)
+runSAPure p@(Problem {neighbor, fitness, schedule, acceptance}) =
+  let s0 = problemToInitialSimState p
+   in reinterpret (evalState s0) $ \_ -> \case
+        Step s -> do
+          coinFlip <- Probability <$> nextDouble
+          nghb <- neighbor s.currentSolution
+          let nghbFitness = fitness nghb
+          accept <- acceptance s.currentSolution nghb s.currentFitness nghbFitness (schedule s.currentBeta)
+          let newBeta = currentBeta s + 1
+          pure $
+            if coinFlip <= accept
+              then SimState {currentSolution = nghb, currentFitness = nghbFitness, currentBeta = newBeta}
+              else s {currentBeta = newBeta}

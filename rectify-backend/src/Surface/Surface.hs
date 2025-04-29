@@ -32,9 +32,13 @@ import Surface.Circular (Circular, Compression (Compression), Radius (..), circu
 import Surface.Index (Index)
 import Surface.Index qualified as Index
 import Surface.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection)
-import System.Random.SplitMix (SMGen, nextDouble, nextInteger)
 import Unsafe.Coerce (unsafeCoerce)
 import Prelude hiding (drop, (++))
+import Random (RandomEff, nextInteger, nextDouble)
+import Config (ConfigEff, Config (..), HL (..))
+import Effectful
+import Data.Functor ((<&>))
+import Effectful.Reader.Dynamic
 
 -- Hmm.
 class SurfaceData (dim :: Nat) where
@@ -85,37 +89,27 @@ surfRemoved o i = case ( maybeRemoveOnePoint 0.5 o,  maybeRemoveOnePoint 0.5 i) 
 
 
 --------- Modification
-modifySurf ::
-  forall avg.
-  (KnownNat avg) =>
-  (Double, Double) -> -- range of random change to x and y
-  SMGen ->
-  Surface Point2D Point2D ->
-  (SMGen, Surface Point2D Point2D)
-modifySurf (high, low) gen s@(Surface (outer :: Vector o Point2D) (inner :: Vector i Point2D)) =
-  let -- Choose a random point on the outer surface (- 1 because nextInteger interval is closed)
-      (i, newgen) = first finite $ nextInteger 0 (natVal (Proxy @o) - 1) gen
-      -- Choose a random change to x and y
-      (xChange, newgen') = first (\x -> X $ x * 2 * high + low) (nextDouble newgen)
-      (yChange, newgen'') = first (\y -> Y $ y * 2 * high + low) (nextDouble newgen')
-      c = Change xChange yChange
+modifySurf
+  :: forall avg es.
+     ( KnownNat avg
+     , RandomEff :> es
+     , ConfigEff :> es
+     )
+  => Surface Point2D Point2D
+  -> Eff es (Surface Point2D Point2D)
+modifySurf s@(Surface (outer :: Vector o Point2D) (inner :: Vector i Point2D)) = do
+  -- Choose a random point on the outer surface (- 1 because nextInteger interval is closed)
+  Config {highLow, addThresh, removeThresh} <- ask 
+  i <- finite <$> nextInteger 0 (natVal (Proxy @o) - 1)
+  xChange <- nextDouble <&> (X . (* (2 * highLow.high * highLow.low)))
+  yChange <- nextDouble <&> (Y . (* (2 * highLow.high * highLow.low)))
+  let c = Change xChange yChange
       smoothedOuterChanges = smooth @8 i c linear
       smoothedInnerChanges = pushInners @avg outer inner smoothedOuterChanges
-      -- Apply the changes first so that detecting intersections is easier
       appliedOuter = outer // (applyChange outer <$> V.toList smoothedOuterChanges)
       appliedInner = inner // (applyChange inner <$> smoothedInnerChanges)
-   in 
-    -- The removal of points may cause intersections, but the not the addition.
-    -- That's why this is organized the way it is. If no intersections are found,
-    -- we call maybeAddSurf
-    case surfRemoved appliedOuter appliedInner of
+  pure case surfRemoved appliedOuter appliedInner of
       (Surface outer' inner') ->
         case linesIntersection . V.toList $ toCircularLines outer' ++ toCircularLines inner' of
-            Just p ->
-              ( newgen'',
-                s
-              )
-            Nothing ->
-              ( newgen'',
-                surfAdded outer' inner'
-              )
+            Just p -> s
+            Nothing -> surfAdded outer' inner'

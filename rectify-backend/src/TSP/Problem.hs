@@ -26,6 +26,8 @@ import Data.Aeson.KeyMap (fromList)
 import Data.Bifunctor (bimap)
 import Helpers (tap)
 import Debug.Pretty.Simple (pTraceShow)
+import Effectful
+import Random (bitmaskWithRejection, RandomEff)
 
 newtype FinnRandoSolution n = FinnRandoSolution {unFinnRandoSolution :: V.Vector n City }
   deriving (Eq, Ord, Show, Generic)
@@ -76,10 +78,10 @@ routeDistance :: Foldable f => f City -> Metric
 routeDistance = L.foldl' (+) 0 . map (uncurry cityDistance) . pairs . toList
 
 tspProblem
-    :: forall n. KnownNat n =>
+    :: forall n es. KnownNat n => RandomEff :> es =>
      Int              -- ^ steps
     -> Set.Set City
-    -> Problem Metric Beta (FinnRandoSolution n)
+    -> Problem es Metric Beta (FinnRandoSolution n)
 tspProblem steps cities = Problem {initial, neighbor, fitness, schedule, acceptance} where
     -- start and end kilometer changes
     km0, km1 :: Double
@@ -89,29 +91,26 @@ tspProblem steps cities = Problem {initial, neighbor, fitness, schedule, accepta
     schedule step = 0 -- log 2 / delta
       where delta = fromIntegral step / fromIntegral steps * (km1 - km0) + km0
 
-    initial g0 = FinnRandoSolution $ fromJust . V.fromList $ go g0 cities where
-        go g rest | Set.null rest = []
-                  | otherwise     =
-            let (w, g') = SM.bitmaskWithRejection64 (fromIntegral (Set.size rest)) g
-                c       = Set.elemAt (fromIntegral w) rest
-            in c : go g' (Set.delete c rest)
+    initial = FinnRandoSolution . fromJust . V.fromList <$> go cities where
+        go rest | Set.null rest = pure []
+                  | otherwise     = do
+            w <- bitmaskWithRejection (fromIntegral (Set.size rest))
+            let c = Set.elemAt (fromIntegral w) rest
+            (c :) <$> go (Set.delete c rest)
 
-    acceptance _ _ = isingAcceptance
+    acceptance _ _ x y z = pure $ isingAcceptance x y z
 
     fitness :: FinnRandoSolution n -> Metric
     fitness = routeDistance . solutionToList
 
-    neighbor :: SM.SMGen -> FinnRandoSolution n -> (SM.SMGen, FinnRandoSolution n)
-    neighbor g (FinnRandoSolution s) =
+    neighbor :: FinnRandoSolution n -> Eff es (FinnRandoSolution n)
+    neighbor (FinnRandoSolution s) = do
         let size = V.length s
-            i, j :: Finite n
-            (i', g') = SM.bitmaskWithRejection64 (fromIntegral size) g
-            (j', g'' ) = SM.bitmaskWithRejection64 (fromIntegral size) g'
+        i' <- bitmaskWithRejection (fromIntegral size)
+        j' <- bitmaskWithRejection (fromIntegral size)
             -- j'       = mod (i' + 1) (fromIntegral $ V.length s)
-
-            i        = finite $ fromIntegral i'
-            j        = finite $ fromIntegral j'
-
+        let (i :: Finite n) = finite $ fromIntegral i'
+        let (j :: Finite n) = finite $ fromIntegral j'
             -- f mv = do
             --     x <- MV.unsafeRead mv i
             --     y <- MV.unsafeRead mv j
@@ -119,8 +118,7 @@ tspProblem steps cities = Problem {initial, neighbor, fitness, schedule, accepta
             --     MV.unsafeWrite mv j x
             x = s `V.index` i
             y = s `V.index` j
-
-        in (g'', FinnRandoSolution $ s V.// [(j, x), (i, y)])
+        pure . FinnRandoSolution $ s V.// [(j, x), (i, y)]
 
 -- loop pairs.
 pairs :: [a] -> [(a,a)]

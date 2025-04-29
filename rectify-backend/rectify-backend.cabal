@@ -57,6 +57,7 @@ library
   hs-source-dirs:   src
   exposed-modules:
       App
+      Random
       SimulatedAnnealing
       Surface.Change
       Surface.Surface
@@ -89,8 +90,8 @@ library
     , random
     -- This is chosen because it's fast to generate random numbers
     , splitmix
-    -- For ReaderT
-    , transformers
+    , effectful
+    , effectful-th
     , containers
     , pretty-simple
     -- application/server/web stuff
