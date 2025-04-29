@@ -2,7 +2,6 @@
 
 module App.WsApp where
 
-import SimulatedAnnealing.Surface.Config
 import Control.Concurrent.STM (TVar, atomically, modifyTVar, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (finally)
 import Control.Monad (forever, when)
@@ -49,6 +48,7 @@ import Servant
   )
 import Servant.API.WebSocket (WebSocketPending)
 import SimulatedAnnealing (Algorithm (..), Problem (..), SimState (..), problemToInitialSimState, step)
+import SimulatedAnnealing.Surface.Config
 import SimulatedAnnealing.Surface.Problem (seed, surfaceProblem)
 import SimulatedAnnealing.TSP.Problem (allCities, tspProblem)
 import UnliftIO.Concurrent (forkIO, yield)
@@ -82,7 +82,7 @@ effAction ::
 effAction prob config algo ctx =
   runEff . runRandomPure seed . runReader config $ serverSendMessage @config algo prob ctx
 
-wsApp :: MonadIO m => PendingConnection -> m ()
+wsApp :: (MonadIO m) => PendingConnection -> m ()
 wsApp pending = liftIO $ do
   conn <- acceptRequest pending
   putStrLn "Client connected"
@@ -100,23 +100,21 @@ wsApp pending = liftIO $ do
   -- Send the initial state to the client
   -- Handle each problem in a separate thread
   _ <- forkIO (effAction (surfaceProblem @100 @100 @7 spConfig.radius spConfig.thickness) spConfig Surface ctx)
-  _ <- forkIO (effAction (tspProblem @30 100 allCities) ("jeba" :: String) TSP ctx)
+  _ <- forkIO (effAction (tspProblem @30 100000 allCities) ("jeba" :: String) TSP ctx)
   _ <- forkIO (effAction (surfaceProblem @100 @100 @7 spConfig.radius 5) spConfig Reservoir ctx)
   -- Handle client messages in a new thread
   liftIO $ finally (handleClientMessages ctx) (putStrLn "Client disconnected")
 
-      
-
 -- TODO: Associate Algorithm type with Problem somehow, so that it becomes
 -- impossible to call this function with a TSP with the wrong Problem record.
-serverSendMessage :: forall config es metric solution beta .
-  ( RandomEff :> es,
-    Reader config :> es,
-    ToJSON metric,
-    ToJSON solution,
-    ToJSON beta,
-    IOE :> es
-  ) =>
+serverSendMessage ::
+  forall config es metric solution beta.
+  RandomEff :> es =>
+  Reader config :> es =>
+  ToJSON metric =>
+  ToJSON solution =>
+  ToJSON beta =>
+  IOE :> es =>
   Algorithm ->
   Problem (Eff es) metric beta solution ->
   Ctx ->

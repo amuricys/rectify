@@ -65,12 +65,12 @@ library
       SimulatedAnnealing.Surface.Change
       SimulatedAnnealing.Surface.Surface2D
       SimulatedAnnealing.Surface.Problem
-      SimulatedAnnealing.Surface.LinAlg
       SimulatedAnnealing.Surface.Circular
-      SimulatedAnnealing.Surface.Index
       SimulatedAnnealing.TSP.Problem
+      Util.Index
+      Util.LinAlg
+      Util.Debug
   other-modules:
-      Helpers
   ghc-options:
        -fplugin GHC.TypeLits.KnownNat.Solver
        -fplugin GHC.TypeLits.Presburger

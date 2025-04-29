@@ -11,11 +11,10 @@ import Data.Vector.Sized qualified as V
 import Debug.Pretty.Simple (pTrace, pTraceShow)
 import GHC.Generics (Generic)
 import GHC.TypeLits (CmpNat, KnownNat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+))
-import Helpers
 import SimulatedAnnealing.Surface.Circular (Circular)
-import SimulatedAnnealing.Surface.Index (Index)
-import SimulatedAnnealing.Surface.Index qualified as Index
-import SimulatedAnnealing.Surface.LinAlg (Point2D (Point2D), X (..), Y (..), dist)
+import Util.Index (Index)
+import Util.Index qualified as Index
+import Util.LinAlg (Point2D (Point2D), X (..), Y (..), dist)
 import Prelude
 import qualified Data.Vector as Unsized
 

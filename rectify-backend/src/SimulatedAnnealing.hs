@@ -12,9 +12,9 @@ import Effectful.State.Dynamic (State, get)
 import Effectful.State.Static.Local (evalState)
 import Effectful.TH (makeEffect)
 import GHC.Generics (Generic)
-import Helpers (tap)
 import Random (RandomEff, nextDouble)
 import Prelude
+import Debug.Pretty.Simple (pTraceShow)
 
 -- Starting from here: https://oleg.fi/gists/posts/2020-06-02-simulated-annealing.html
 newtype Probability = Probability {unProbability :: Double}
@@ -69,7 +69,7 @@ problemToInitialSimState problem = do
       }
 
 step ::
-  (RandomEff :> es) =>
+  RandomEff :> es =>
   Problem (Eff es) metric beta solution ->
   SimState metric solution beta ->
   Eff es (SimState metric solution beta)
@@ -89,10 +89,8 @@ step Problem {neighbor, fitness, schedule, acceptance} s = do
 
   -- 3) flip the coin
   coin <- Probability <$> nextDouble
-
-  -- 4) bump beta and decide
-  let newBetaCounter = betaCounter s + 1
   pure $
     if coin <= prob
       then SimState nghb fNghb newBetaCounter (schedule newBetaCounter)
       else s {betaCounter = newBetaCounter, beta = schedule newBetaCounter}
+      where newBetaCounter = betaCounter s + 1

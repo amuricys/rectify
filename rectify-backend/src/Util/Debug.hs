@@ -1,4 +1,4 @@
-module Helpers where
+module Util.Debug where
 
 import Prelude
 

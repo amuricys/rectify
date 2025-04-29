@@ -53,9 +53,9 @@ import SimulatedAnnealing.Surface.Circular
     maybeRemoveOnePoint,
     toCircularLines,
   )
-import SimulatedAnnealing.Surface.Index (Index)
-import SimulatedAnnealing.Surface.Index qualified as Index
-import SimulatedAnnealing.Surface.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection)
+import Util.Index (Index)
+import Util.Index qualified as Index
+import Util.LinAlg (Point2D (Point2D), X (X), Y (Y), dist, linesIntersection)
 import Prelude hiding (drop, (++))
 
 -- Hmm.

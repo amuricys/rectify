@@ -13,13 +13,12 @@ import Data.Vector.Sized qualified as V
 import Effectful
 import Effectful.Reader.Dynamic (Reader, ask)
 import GHC.TypeLits (KnownNat, natVal, type (+), type (<=))
-import Helpers
 import Random (RandomEff, nextDouble, nextInteger)
 import SimulatedAnnealing (Probability (Probability), Problem (..))
 import SimulatedAnnealing.Surface.Change (Change (..), applyChange, linear, pushInners, smooth)
 import SimulatedAnnealing.Surface.Circular (area, toCircularLines, Radius)
 import SimulatedAnnealing.Surface.Config
-import SimulatedAnnealing.Surface.LinAlg (Point2D, X (X), Y (Y), linesIntersection)
+import Util.LinAlg (Point2D, X (X), Y (Y), linesIntersection)
 import SimulatedAnnealing.Surface.Surface2D (Surface (Surface, inner, outer), circularSurface2D, surfRemoved, surfAdded, Thickness)
 import System.Random.SplitMix (SMGen, mkSMGen)
 import Prelude hiding ((++))

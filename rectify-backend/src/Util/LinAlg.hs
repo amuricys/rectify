@@ -1,7 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module SimulatedAnnealing.Surface.LinAlg where
+module Util.LinAlg where
 
 import Prelude
 
@@ -21,7 +21,7 @@ import SimulatedAnnealing (Probability (..))
 import System.Random (Random, StdGen, randomIO, randomRIO, uniformR)
 import System.Random.SplitMix (SMGen, mkSMGen, nextDouble, nextInteger)
 import System.Random.Stateful (StatefulGen)
-import SimulatedAnnealing.Surface.Index qualified as Index
+import Util.Index qualified as Index
 
 newtype X = X {unX :: Double}
   deriving newtype (Show, Eq, Ord, Num, Fractional, FromJSON, ToJSON, Random)
@@ -57,6 +57,8 @@ add (Point2D (X x1) (Y y1)) (Point2D (X x2) (Y y2)) = Point2D (X $ x1 + x2) (Y $
 sub :: Point2D -> Point2D -> Point2D
 sub (Point2D (X x1) (Y y1)) (Point2D (X x2) (Y y2)) = Point2D (X $ x1 - x2) (Y $ y1 - y2)
 
+pointBimap :: (X -> X) -> (Y -> Y) -> Point2D -> Point2D
+pointBimap f g (Point2D x y) = Point2D (f x) (g y)
 class ApproxEq a where
   (~==) :: a -> a -> Bool
   infix 4 ~==

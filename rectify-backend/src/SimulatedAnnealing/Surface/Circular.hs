@@ -27,9 +27,9 @@ import GHC.TypeLits
     type (-),
   )
 import GHC.TypeNats (natVal, sameNat, someNatVal)
-import SimulatedAnnealing.Surface.Index (next, prev)
-import SimulatedAnnealing.Surface.Index qualified as Index
-import SimulatedAnnealing.Surface.LinAlg ( Line, Point2D(..), Y(..), X(..), add, scalarMult, dist )
+import Util.Index (next, prev)
+import Util.Index qualified as Index
+import Util.LinAlg ( Line, Point2D(..), Y(..), X(..), add, scalarMult, dist )
 import System.Random (Random)
 import Prelude hiding ((++))
 
