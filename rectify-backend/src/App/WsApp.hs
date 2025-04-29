@@ -69,6 +69,7 @@ effAction ::
   forall metric solution config beta es.
   ToJSON metric =>
   ToJSON solution =>
+  ToJSON beta =>
   Problem
     (Eff '[Reader config, RandomEff, IOE])
     metric
@@ -113,6 +114,7 @@ serverSendMessage :: forall config es metric solution beta .
     Reader config :> es,
     ToJSON metric,
     ToJSON solution,
+    ToJSON beta,
     IOE :> es
   ) =>
   Algorithm ->

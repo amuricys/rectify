@@ -12,7 +12,7 @@ import Data.Bifunctor (lmap)
 import Data.Either (Either)
 import Data.Generic.Rep (class Generic)
 import Data.Tuple (uncurry)
-import Diagram as Diagram
+import Diagram.Surface as Diagram.Surface
 
 data BackendSolution
   = SurfaceSolution
@@ -31,14 +31,16 @@ instance encodeJsonBackendSolution :: EncodeJson BackendSolution where
   encodeJson a = genericEncodeJson a
 
 type BackendSimState sol =
-  { currentBeta :: Int
-  , currentFitness :: Number
-  , currentSolution :: sol
+  { betaCounter :: Int
+  , beta :: Number
+  , fitness :: Number
+  , solution :: sol
   }
 
 type BackendPoint = { x :: Number, y :: Number }
 
-newtype DiagramData = DiagramData { nodes :: Array (Record Diagram.NodeData), links :: Array (Record Diagram.LinkData) }
+newtype DiagramData = DiagramData { nodes :: Array (Record Diagram.Surface.NodeData), links :: Array (Record Diagram.Surface.LinkData) }
+
 derive newtype instance semigroupDiagramData :: Semigroup DiagramData
 derive newtype instance decodeJsonDiagramData :: DecodeJson DiagramData
 derive newtype instance encodeJsonDiagramData :: EncodeJson DiagramData
@@ -50,10 +52,10 @@ cyclicalArrayToDiagramData cat start points = DiagramData
   , links: map (toLink cat start (start + length points - 1)) (start .. (start + length points - 1))
   }
 
-toPoint :: String -> Int -> BackendPoint -> Record Diagram.NodeData
+toPoint :: String -> Int -> BackendPoint -> Record Diagram.Surface.NodeData
 toPoint cat id p = { key: id, loc: show p.x <> " " <> show p.y, category: cat }
 
-toLink :: String -> Int -> Int -> Int -> Record Diagram.LinkData
+toLink :: String -> Int -> Int -> Int -> Record Diagram.Surface.LinkData
 toLink cat first last i = { key: i, from: i, to: if i /= last then i + 1 else first, category: cat }
 
 fromSolution :: BackendSolution -> DiagramData
@@ -64,5 +66,9 @@ fromSolution = case _ of
 
 parse
   :: String
-  -> Either String DiagramData
-parse = pure <<< fromSolution <<< _.currentSolution <=< lmap show <<< decodeJson @(BackendSimState BackendSolution) <=< jsonParser
+  -> Either String (BackendSimState DiagramData)
+parse =
+  pure <<< (\x -> x { solution = fromSolution x.solution })
+  <=<
+  lmap show <<< decodeJson @(BackendSimState BackendSolution)
+  <=< jsonParser

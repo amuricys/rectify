@@ -45,7 +45,9 @@ wsConsumer :: (forall a. Parent.Query a -> Aff (Maybe a)) -> CR.Consumer String 
 wsConsumer query = CR.consumer \msg -> do
   -- TODO: how do we parse a bunch of sum types sustainably?
   case parse msg of
-    Right simState -> void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveSimState simState
+    Right simState -> do
+      void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveDiagramData simState.solution
+      
     Left err -> liftEffect $ ffilog err
   pure Nothing
 

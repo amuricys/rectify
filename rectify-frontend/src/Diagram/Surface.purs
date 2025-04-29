@@ -1,4 +1,4 @@
-module Diagram where
+module Diagram.Surface where
 
 import Prelude
 
@@ -49,14 +49,14 @@ toolTipStyle surf =
 outerNodeTemplate :: MadeGraphObject NodeData Node_ Node_
 outerNodeTemplate = node @Auto' do
   shape Circle $ do
-    set { fill: "blanchedalmond", desiredSize: SizeBoth 2.5, strokeWidth: 0.2 }
+    set { fill: "blanchedalmond", desiredSize: SizeBoth 1.25, strokeWidth: 0.07 }
   binding @"location" @"loc" (Just Point.parse_) Nothing
   toolTipStyle "Outer"
 
 innerNodeTemplate :: MadeGraphObject NodeData Node_ Node_
 innerNodeTemplate = node @Auto' do
   shape Circle $ do
-    set { fill: "burlywood", desiredSize: SizeBoth 2.5, strokeWidth: 0.2 }
+    set { fill: "burlywood", desiredSize: SizeBoth 1.25, strokeWidth: 0.07 }
   binding @"location" @"loc" (Just Point.parse_) Nothing
   toolTipStyle "Inner"
 
@@ -67,10 +67,10 @@ diag initialNodeData initialLinkData = do
   addNodeTemplate "Inner" innerNodeTemplate
   addLinkTemplate "Outer" $ link
     $ shape None
-    $ set { stroke: "black", strokeWidth: 0.25 }
+    $ set { stroke: "black", strokeWidth: 0.1 }
   addLinkTemplate "Inner" $ link
     $ shape None
-    $ set { stroke: "black", strokeWidth: 0.25 }
+    $ set { stroke: "black", strokeWidth: 0.1 }
   graphLinksModel do
     set
       { nodeDataArray: initialNodeData

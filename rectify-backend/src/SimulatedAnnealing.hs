@@ -1,7 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module SimulatedAnnealing where
 
@@ -37,57 +37,62 @@ data Problem m metric beta solution = Problem
       m Probability
   }
 
-data SimState metric solution = SimState
-  { currentSolution :: solution,
-    currentFitness :: metric,
-    currentBeta :: Integer
+data SimState metric solution beta = SimState
+  { solution :: solution,
+    fitness :: metric,
+    betaCounter :: Integer, -- Need both beta and counter to send to frontend
+    beta :: beta
   }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 
-instance (Eq metric, Eq solution) => Eq (SimState metric solution) where
-  (==) a b = currentSolution a == currentSolution b && currentFitness a == currentFitness b && currentBeta a == currentBeta b
-
-instance (ToJSON metric, ToJSON solution) => ToJSON (SimState metric solution) where
+instance (ToJSON metric, ToJSON solution, ToJSON beta) => ToJSON (SimState metric solution beta) where
   -- Exclude gen from serialization
-  toJSON SimState {currentSolution, currentFitness, currentBeta} =
+  toJSON SimState {solution, fitness, beta, betaCounter} =
     Object $
       fromList
-        [ ("currentSolution", toJSON currentSolution),
-          ("currentFitness", toJSON currentFitness),
-          ("currentBeta", toJSON currentBeta)
+        [ ("solution", toJSON solution),
+          ("fitness", toJSON fitness),
+          ("beta", toJSON beta),
+          ("betaCounter", toJSON betaCounter)
         ]
 
-problemToInitialSimState :: (Monad m) => Problem m metric beta solution -> m (SimState metric solution)
+problemToInitialSimState :: (Monad m) => Problem m metric beta solution -> m (SimState metric solution beta)
 problemToInitialSimState problem = do
   is <- problem.initial
   let f = problem.fitness is
-  pure SimState {currentSolution = is, currentFitness = f, currentBeta = 0}
+  pure
+    SimState
+      { solution = is,
+        fitness = f,
+        betaCounter = 0,
+        beta = problem.schedule 0
+      }
 
 step ::
   (RandomEff :> es) =>
   Problem (Eff es) metric beta solution ->
-  SimState metric solution ->
-  Eff es (SimState metric solution)
+  SimState metric solution beta ->
+  Eff es (SimState metric solution beta)
 step Problem {neighbor, fitness, schedule, acceptance} s = do
   -- 1) propose a neighbor
-  nghb <- neighbor (currentSolution s)
+  nghb <- neighbor s.solution
   let fNghb = fitness nghb
 
   -- 2) compute acceptance probability
   prob <-
     acceptance
-      (currentSolution s)
+      s.solution
       nghb
-      (currentFitness s)
+      s.fitness
       fNghb
-      (schedule (currentBeta s))
+      (schedule s.betaCounter)
 
   -- 3) flip the coin
   coin <- Probability <$> nextDouble
 
   -- 4) bump beta and decide
-  let newBeta = currentBeta s + 1
+  let newBetaCounter = betaCounter s + 1
   pure $
     if coin <= prob
-      then SimState nghb fNghb newBeta
-      else s {currentBeta = newBeta}
+      then SimState nghb fNghb newBetaCounter (schedule newBetaCounter)
+      else s {betaCounter = newBetaCounter, beta = schedule newBetaCounter}

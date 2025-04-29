@@ -7,7 +7,7 @@ import Backend (DiagramData(..))
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import Data.Maybe (Maybe(..))
-import Diagram as Diagram
+import Diagram.Surface as Diagram.Surface
 import Effect.Class (class MonadEffect, liftEffect)
 import GoJS.Diagram (Diagram_, _model)
 import GoJS.Model (mergeLinkDataArray_, mergeNodeDataArray_)
@@ -24,7 +24,7 @@ data SimState solution metric = SimState
   , currentFitness :: metric
   }
 data Action = Initialize
-data Query a = ReceiveSimState DiagramData a | AlgorithmChange DiagramData Algorithm a
+data Query a = ReceiveDiagramData DiagramData a | AlgorithmChange DiagramData Algorithm a
 data CanvasState = SurfaceDiagram Diagram_ | TSPDiagram Diagram_ | NoDiagramYet
 
 updateDiagram :: forall output m a. MonadEffect m => Diagram_ -> DiagramData -> a -> H.HalogenM CanvasState Action () output m (Maybe a)
@@ -37,10 +37,10 @@ updateDiagram diagram (DiagramData { nodes, links }) a = do
 handleQuery :: forall m a. MonadEffect m => Query a -> H.HalogenM CanvasState Action () Void m (Maybe a)
 handleQuery = case _ of
   -- Here we'll talk to GoJS
-  AlgorithmChange initialState alg a -> do
-    initDiagram initialState alg
+  AlgorithmChange state alg a -> do
+    initDiagram state alg
     pure $ Just a
-  ReceiveSimState msg a -> do
+  ReceiveDiagramData msg a -> do
     H.get >>= case _ of
       SurfaceDiagram d -> updateDiagram d msg a
       TSPDiagram d -> updateDiagram d msg a
@@ -74,11 +74,11 @@ component = H.mkComponent
 initDiagram :: forall m. MonadEffect m => DiagramData -> Algorithm -> H.HalogenM CanvasState Action () Void m Unit
 initDiagram (DiagramData initialState) _alg = do
   -- TODO: 1. Clear existing diagram before this, then 2. Make different diagram for different algorithms
-  d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.diag initialState.nodes initialState.links)
+  d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.Surface.diag initialState.nodes initialState.links)
   H.modify_ <<< const $ SurfaceDiagram d
 
 handleAction :: forall slots m. MonadEffect m => Action -> H.HalogenM CanvasState Action slots Void m Unit
 handleAction = case _ of
   Initialize -> do
-    d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.diag [] [])
+    d <- liftEffect $ Went.make "myDiagramDiv" (Diagram.Surface.diag [] [])
     H.modify_ <<< const $ SurfaceDiagram d
