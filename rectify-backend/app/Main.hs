@@ -1,5 +1,5 @@
 module Main where
 
-import App qualified
+import App.Main qualified
 
-main = App.main
+main = App.Main.main

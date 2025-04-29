@@ -56,16 +56,19 @@ library
   import: defaults
   hs-source-dirs:   src
   exposed-modules:
-      App
+      App.API
+      App.WsApp
+      App.Main
       Random
       SimulatedAnnealing
-      Surface.Change
-      Surface.Surface
-      Surface.Problem
-      Surface.LinAlg
-      Surface.Circular
-      Surface.Index
-      TSP.Problem
+      SimulatedAnnealing.Surface.Config
+      SimulatedAnnealing.Surface.Change
+      SimulatedAnnealing.Surface.Surface2D
+      SimulatedAnnealing.Surface.Problem
+      SimulatedAnnealing.Surface.LinAlg
+      SimulatedAnnealing.Surface.Circular
+      SimulatedAnnealing.Surface.Index
+      SimulatedAnnealing.TSP.Problem
   other-modules:
       Helpers
   ghc-options:

@@ -1,7 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
-module Surface.Index where
+module SimulatedAnnealing.Surface.Index where
 
 import Prelude
 import GHC.TypeLits

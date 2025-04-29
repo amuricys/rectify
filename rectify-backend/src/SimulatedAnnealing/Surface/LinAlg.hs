@@ -1,7 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module Surface.LinAlg where
+module SimulatedAnnealing.Surface.LinAlg where
 
 import Prelude
 
@@ -21,7 +21,7 @@ import SimulatedAnnealing (Probability (..))
 import System.Random (Random, StdGen, randomIO, randomRIO, uniformR)
 import System.Random.SplitMix (SMGen, mkSMGen, nextDouble, nextInteger)
 import System.Random.Stateful (StatefulGen)
-import qualified Surface.Index as Index
+import SimulatedAnnealing.Surface.Index qualified as Index
 
 newtype X = X {unX :: Double}
   deriving newtype (Show, Eq, Ord, Num, Fractional, FromJSON, ToJSON, Random)
@@ -119,3 +119,4 @@ linesIntersection l =
       -- Recurse on the head because ts is a list of tails
       Nothing -> go Nothing (l1 : ls)
       Just p -> Just p
+

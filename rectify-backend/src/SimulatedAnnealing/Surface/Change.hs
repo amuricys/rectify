@@ -1,7 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BlockArguments #-}
 
-module Surface.Change where
+module SimulatedAnnealing.Surface.Change where
 
 import Data.Finite (finite, getFinite)
 import Data.List (sortBy)
@@ -12,10 +12,10 @@ import Debug.Pretty.Simple (pTrace, pTraceShow)
 import GHC.Generics (Generic)
 import GHC.TypeLits (CmpNat, KnownNat, OrderingI (LTI), SomeNat (SomeNat), cmpNat, natVal, someNatVal, type (+))
 import Helpers
-import Surface.Circular (Circular)
-import Surface.Index (Index)
-import Surface.Index qualified as Index
-import Surface.LinAlg (Point2D (Point2D), X (..), Y (..), dist)
+import SimulatedAnnealing.Surface.Circular (Circular)
+import SimulatedAnnealing.Surface.Index (Index)
+import SimulatedAnnealing.Surface.Index qualified as Index
+import SimulatedAnnealing.Surface.LinAlg (Point2D (Point2D), X (..), Y (..), dist)
 import Prelude
 import qualified Data.Vector as Unsized
 

@@ -4,7 +4,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Surface.Circular where
+module SimulatedAnnealing.Surface.Circular where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Finite (Finite, finite, getFinite)
@@ -27,19 +27,17 @@ import GHC.TypeLits
     type (-),
   )
 import GHC.TypeNats (natVal, sameNat, someNatVal)
-import Surface.Index (next, prev)
-import Surface.Index qualified as Index
-import Surface.LinAlg ( Line, Point2D(..), Y(..), X(..), add, scalarMult, dist )
+import SimulatedAnnealing.Surface.Index (next, prev)
+import SimulatedAnnealing.Surface.Index qualified as Index
+import SimulatedAnnealing.Surface.LinAlg ( Line, Point2D(..), Y(..), X(..), add, scalarMult, dist )
 import System.Random (Random)
 import Prelude hiding ((++))
 
 type Circular i = Vector i Point2D
 
 newtype Radius = Radius {unRadius :: Double}
-  deriving newtype (Show, Eq, Num, Fractional, FromJSON, ToJSON)
+  deriving newtype (Show, Eq, Num, Ord, Fractional, FromJSON, ToJSON)
 
-newtype Compression = Compression {unCompression :: Double}
-  deriving newtype (Show, Eq, Num, Ord, Fractional, FromJSON, ToJSON, Random)
 
 circularGraph :: forall n. (KnownNat n) => X -> Y -> Radius -> Circular n
 circularGraph (X centerx) (Y centery) (Radius radius) =
@@ -61,7 +59,7 @@ area v =
     indices :: Vector n (Finite n)
     indices = generate id
 
-toCircularLines :: (KnownNat n) => Vector n Point2D -> Vector n Line
+toCircularLines :: (KnownNat n) => Circular n -> Vector n Line
 toCircularLines ps = generate $ \i -> (ps `index` i, ps `index` Index.next i)
 
 data AtLeastOneVector n rel
@@ -82,7 +80,7 @@ maybeAddOnePoint ::
   (KnownNat n) =>
   (n ~ nprev + 1) =>
   Double ->
-  Vector n Point2D ->
+  Circular n ->
   AtLeastOneVector n (GtBy 1) -- could parametrize if we want to add several at once
 maybeAddOnePoint threshold v =
   case V.findIndex (\(p, idx) -> dist p (v `index` Index.next idx) > threshold) (V.zip v $ V.generate id) of
@@ -106,7 +104,7 @@ maybeRemoveOnePoint ::
   (KnownNat n) =>
   (n ~ nprev + 1) =>
   Double ->
-  Vector n Point2D ->
+  Circular n ->
   AtLeastOneVector n (LtBy 1) -- could parametrize if we want to remove several at once
 maybeRemoveOnePoint threshold v =
   case V.findIndex (\(p, idx) -> dist p (v `index` Index.prev idx) < threshold) (V.zip v $ V.generate id) of
@@ -144,6 +142,3 @@ maybeRemoveOnePoint threshold v =
             Exists -> AtLeastOneVector v''''
         _ -> error ("impossible: " <> show (natVal $ Proxy @i) <> ", " <> show (natVal $ Proxy @nprev) <> ", ")
     Nothing -> AtLeastOneVector v
-
--- >>> maybeRemoveOnePoint 0.6 (fromJust $ V.fromList @4 (fromListRepeated [10.0, 10.02, 13.5, 9.0]))
--- AtLeastOneVector (Vector [Point2D {x = 10.01, y = 10.01},Point2D {x = 13.5, y = 13.5},Point2D {x = 9.0, y = 9.0}])

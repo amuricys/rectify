@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds       #-}
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE DerivingStrategies #-}
-module TSP.Problem where
+module SimulatedAnnealing.TSP.Problem where
 
 import Prelude
 
@@ -17,7 +17,7 @@ import qualified System.Random.SplitMix as SM
 import GHC.TypeLits (Nat, KnownNat)
 import Data.Proxy (Proxy(..))
 
-import SimulatedAnnealing
+import SimulatedAnnealing (Probability (Probability), Problem (..))
 import Data.Maybe (fromJust)
 import Data.Finite (finite, Finite)
 import Data.Aeson (ToJSON (toJSON), Value (Object))
@@ -81,7 +81,7 @@ tspProblem
     :: forall n es. KnownNat n => RandomEff :> es =>
      Int              -- ^ steps
     -> Set.Set City
-    -> Problem es Metric Beta (FinnRandoSolution n)
+    -> Problem (Eff es) Metric Beta (FinnRandoSolution n)
 tspProblem steps cities = Problem {initial, neighbor, fitness, schedule, acceptance} where
     -- start and end kilometer changes
     km0, km1 :: Double
