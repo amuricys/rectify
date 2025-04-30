@@ -3,7 +3,6 @@ module Main where
 import Prelude
 
 import Backend (parse)
-import Component.Canvas as Canvas
 import Component.Parent as Parent
 import Control.Coroutine as CR
 import Control.Coroutine.Aff as CRA
@@ -45,9 +44,7 @@ wsConsumer :: (forall a. Parent.Query a -> Aff (Maybe a)) -> CR.Consumer String 
 wsConsumer query = CR.consumer \msg -> do
   -- TODO: how do we parse a bunch of sum types sustainably?
   case parse msg of
-    Right simState -> do
-      void $ query $ H.mkTell $ Parent.CanvasQuery <<< Canvas.ReceiveDiagramData simState.solution
-      
+    Right simState -> void $ query $ H.mkTell $ Parent.PropagateBackendData simState
     Left err -> liftEffect $ ffilog err
   pure Nothing
 

@@ -3,12 +3,17 @@ module Component.Parent where
 import Prelude
 
 import Algorithm (Algorithm)
+import Backend (Solution(..))
+import Backend as Backend
+import Backend.Surface (fromSurfaceSolution)
+import Backend.TSP (fromTSPSolutionData)
+import CSS as CSS
 import Component.Banner as Banner
 import Component.Button as Button
-import Component.Canvas as Canvas
-import Component.Energy as Energy
+import Component.Diagram.Canvas as Canvas
+import Component.Diagram.Energy as Energy
+import Component.Diagram.Temperature as Temperature
 import Component.Tabs as Tabs
-import Component.Temperature as Temperature
 import Data.Maybe (Maybe(..))
 import Effect.Aff.Class (class MonadAff)
 import Effect.Class (class MonadEffect)
@@ -18,14 +23,15 @@ import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
 import RunCommand (RunCommand)
 import Type.Prelude (Proxy(..))
-import CSS as CSS
 
 type ComponentState = Unit
 
 data Action = RunAction RunCommand | AlgorithmChangeAction Algorithm
 data Output = SendRunCommand RunCommand | SendAlgorithmChange Algorithm
 
-data Query a = CanvasQuery (Canvas.Query a)
+data Query a 
+  = PropagateBackendData (Backend.SimState Backend.Solution) a 
+  | AlgorithmChange (Backend.SimState Backend.Solution) Algorithm a
 
 -- Constants to avoid mixing up indices and proxies
 inds :: { banner :: Int , button :: Int , canvas :: Int , tabs :: Int , temperature :: Int , energy :: Int }
@@ -49,7 +55,7 @@ _temperature = Proxy
 _energy :: Proxy "energy"
 _energy = Proxy
 
-component :: forall input m. MonadAff m => H.Component Query input Output m
+component :: forall input m. MonadAff m => H.Component (Query) input Output m
 component =
   H.mkComponent
     { initialState: const unit
@@ -57,13 +63,20 @@ component =
     , eval: H.mkEval H.defaultEval { handleAction = handleAction, handleQuery = handleQuery }
     }
 
+
+solData str = case str.solution of 
+  SurfaceSolution surfSolData -> fromSurfaceSolution surfSolData
+  TSPSolution tspSolData -> fromTSPSolutionData tspSolData
+
 handleQuery :: forall m output q a. Query a -> H.HalogenM ComponentState Action (Slots q) output m (Maybe a)
-handleQuery (CanvasQuery q) = case q of
-  Canvas.ReceiveDiagramData str a -> do
-    H.tell _canvas inds.canvas (Canvas.ReceiveDiagramData str)
+handleQuery q = case q of
+  PropagateBackendData str a -> do
+    H.tell _canvas inds.canvas <<< Canvas.ReceiveDiagramData $ solData str
+    H.tell _temperature inds.temperature (Temperature.ReceiveTemperature { beta: str.beta, betaCounter: str.betaCounter })
+    H.tell _energy inds.energy (Energy.ReceiveEnergy { fitness: str.fitness })
     pure (Just a)
-  Canvas.AlgorithmChange initialState alg a -> do
-    H.tell _canvas inds.canvas (Canvas.AlgorithmChange initialState alg)
+  AlgorithmChange initialState alg a -> do
+    H.tell _canvas inds.canvas (Canvas.AlgorithmChange (solData initialState) alg)
     pure (Just a)
 
 type Slots q =
@@ -100,7 +113,8 @@ render _ =
                 CSS.width (CSS.px 250.0) -- Fixed width for the side panel
                 CSS.height (CSS.px 500.0) -- Match canvas height
             ]
-            [ HH.div -- Temperature container
+            [ 
+              HH.div -- Temperature container
                 [ HCSS.style do
                     CSS.height (CSS.pct 50.0) -- Takes top 50% height
                     CSS.boxSizing CSS.borderBox
