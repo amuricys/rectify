@@ -2,7 +2,9 @@ module Diagram.TimeSeries where
 
 import Prelude
 
+import Data.Int (toNumber)
 import Data.Maybe (Maybe(..))
+import GoJS.Debug (ffilog, trace)
 import GoJS.Diagram (Diagram_, _initialAutoScale)
 import GoJS.Diagram.Properties (_allowMove, _allowZoom)
 import GoJS.Geometry.Point.Static as Point
@@ -17,20 +19,19 @@ import Went.Model (binding, graphLinksModel)
 import Went.Settable (set)
 
 -- Node categories
-invisibleCategory :: String
-invisibleCategory = "InvisibleAxis"
+pastDataPointCategory :: String
+pastDataPointCategory = "PastDataPoint"
 
-dataPointCategory :: String
-dataPointCategory = "DataPoint"
+presentDataPointCategory :: String
+presentDataPointCategory = "PresentDataPoint"
 
 -- Link categories
-dataLinkCategory :: String
-dataLinkCategory = "DataLink"
+linkCategory :: String
+linkCategory = "Link"
 
 -- Raw data point type (used by the component managing the diagram)
 type TimeValuePoint = { time :: Number, value :: Number }
 
--- Node data structure for GoJS model
 type NodeData =
   ( key :: String -- Using String keys for flexibility (e.g., "origin", "max_y", "t_123.45")
   , category :: String
@@ -39,7 +40,6 @@ type NodeData =
   , value :: Number
   )
 
--- Link data structure for GoJS model
 type LinkData =
   ( key :: String -- Unique link key (e.g., "link_123.45")
   , from :: String -- Key of the 'from' node
@@ -47,26 +47,23 @@ type LinkData =
   , category :: String
   )
 
--- Helper to create a data point node record
-mkDataPointNode :: TimeValuePoint -> String -> Record NodeData
-mkDataPointNode tv locString =
-  { key: "t_" <> show tv.time
-  , category: dataPointCategory
-  , loc: locString
-  , time: tv.time
-  , value: tv.value
+mkDataPointNode :: Int -> Number -> Int -> Number -> Record NodeData
+mkDataPointNode x y time value =
+  { key: "t_" <> show time
+  , category: if time == 0 then presentDataPointCategory else pastDataPointCategory
+  , loc: trace $ show (toNumber x) <> " " <> show y
+  , time: toNumber time
+  , value: value
   }
 
--- Helper to create a link record between two time points
-mkLink :: Number -> Number -> Record LinkData
+mkLink :: Int -> Int -> Record LinkData
 mkLink t1 t2 =
   { key: "link_" <> show t1 <> "_" <> show t2
   , from: "t_" <> show t1
   , to: "t_" <> show t2
-  , category: dataLinkCategory
+  , category: linkCategory
   }
 
--- Tooltip template for data points
 dataPointToolTip :: forall p g. IsPanel p => MakeGraphObject NodeData p g Unit
 dataPointToolTip =
   toolTip $
@@ -83,14 +80,11 @@ dataPointToolTip =
         set { row: 1, column: 1 }
         binding @"text" @"value" (Just show) Nothing
 
--- Node template for invisible axis markers
 invisibleNodeTemplate :: MadeGraphObject NodeData Node_ Node_
 invisibleNodeTemplate = node @Auto' do
-  set { desiredSize: SizeBoth 1.0 } -- Minimal size
-  binding @"location" @"loc" (Just Point.parse_) Nothing
--- We don't add any visual elements (shape, textBlock)
+  set { desiredSize: SizeBoth 1.0 }
+  binding @"location" @"loc" (Just (Point.parse_ <<< trace)) Nothing
 
--- Node template for visible data points
 dataNodeTemplate :: MadeGraphObject NodeData Node_ Node_
 dataNodeTemplate = node @Auto' do
   shape Circle $ do
@@ -101,23 +95,21 @@ dataNodeTemplate = node @Auto' do
       , desiredSize: SizeBoth 5.0 -- Small circle
       }
   binding @"location" @"loc" (Just Point.parse_) Nothing
-  dataPointToolTip -- Attach the tooltip
+  dataPointToolTip
 
--- Link template for connecting data points
 dataLinkTemplate :: MadeGraphObject LinkData Link_ Link_
 dataLinkTemplate = link do
-  shape None $ do -- Shape follows the link path
+  shape None $ do
     set { stroke: "grey", strokeWidth: 1.0 }
 
--- Main diagram definition function
 diag :: Array (Record NodeData) -> Array (Record LinkData) -> MakeDiagram NodeData LinkData Diagram_ Unit
 diag initialNodeData initialLinkData = do
   attach
     { "undoManager.isEnabled": false
     }
-  addNodeTemplate invisibleCategory invisibleNodeTemplate
-  addNodeTemplate dataPointCategory dataNodeTemplate
-  addLinkTemplate dataLinkCategory dataLinkTemplate
+  addNodeTemplate pastDataPointCategory invisibleNodeTemplate
+  addNodeTemplate presentDataPointCategory dataNodeTemplate
+  addLinkTemplate linkCategory dataLinkTemplate
 
   graphLinksModel do
     set

@@ -73,7 +73,7 @@ handleQuery q = case q of
   PropagateBackendData str a -> do
     H.tell _canvas inds.canvas <<< Canvas.ReceiveDiagramData $ solData str
     H.tell _temperature inds.temperature (Temperature.ReceiveTemperature { beta: str.beta, betaCounter: str.betaCounter })
-    H.tell _energy inds.energy (Energy.ReceiveEnergy { fitness: str.fitness })
+    H.tell _energy inds.energy (Energy.ReceiveEnergy { fitness: str.fitness, betaCounter: str.betaCounter })
     pure (Just a)
   AlgorithmChange initialState alg a -> do
     H.tell _canvas inds.canvas (Canvas.AlgorithmChange (solData initialState) alg)
@@ -117,16 +117,17 @@ render _ =
               HH.div -- Temperature container
                 [ HCSS.style do
                     CSS.height (CSS.pct 50.0) -- Takes top 50% height
+                    CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
                     CSS.boxSizing CSS.borderBox
                 ]
-                [ HH.slot_ _temperature inds.temperature Temperature.component unit ]
+                [ HH.slot_ _temperature inds.temperature (Temperature.component 0.0) unit ]
             , HH.div -- Energy container
                 [ HCSS.style do
                     CSS.height (CSS.pct 50.0) -- Takes bottom 50% height
                     CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
                     CSS.boxSizing CSS.borderBox
                 ]
-                [ HH.slot_ _energy inds.energy Energy.component unit ]
+                [ HH.slot_ _energy inds.energy (Energy.component 0.0) unit ]
             ]
         ]
     , HH.slot _button inds.button Button.component unit buttonAct -- Button below the canvas/graphs area

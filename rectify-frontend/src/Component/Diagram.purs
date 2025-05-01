@@ -18,7 +18,7 @@ import Went.Diagram.Make as Went
 
 data Action = Initialize
 
-data State s = DiagramAndState { state :: s, diagram :: Diagram_ } | NoDiagramYet { state :: s }
+type State s = { state :: s, diagram :: Maybe Diagram_ }
 
 type MkDiagram nodeData linkData = Array (Record nodeData) -> Array (Record linkData) -> MakeDiagram nodeData linkData Diagram_ Unit
 
@@ -31,7 +31,7 @@ diagramComponent
   -> (forall a.query a -> H.HalogenM (State s) Action () Void m (Maybe a))
   -> H.Component query input Void m
 diagramComponent s diagramDivId mkDiagram handleQuery = H.mkComponent
-  { initialState: const (NoDiagramYet { state: s })
+  { initialState: const { state: s, diagram: Nothing }
   , render
   , eval: H.mkEval $ H.defaultEval
       { handleAction = handleAction diagramDivId mkDiagram
@@ -69,6 +69,4 @@ initDiagram :: forall m nodeData linkData s. MonadEffect m => String -> DiagramD
 initDiagram divId (DiagramData initialState) mkDiagram = do
   -- TODO: 1. Clear existing diagram before this, then 2. Make different diagram for different algorithms
   d <- liftEffect $ Went.make divId (mkDiagram initialState.nodes initialState.links)
-  H.modify_ case _ of
-    NoDiagramYet { state: s } -> DiagramAndState { state: s, diagram: d }
-    DiagramAndState { state: s } -> DiagramAndState { state: s, diagram: d }
+  H.modify_ _ { diagram = Just d } 
