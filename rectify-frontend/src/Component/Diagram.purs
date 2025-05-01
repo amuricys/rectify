@@ -43,16 +43,14 @@ diagramComponent s diagramDivId mkDiagram handleQuery = H.mkComponent
   --  render :: forall mon slot s. MonadEffect mon => s -> H.ComponentHTML Action slot mon
   render _ =
     -- This below div is for rendering of the diagram.
+    -- GoJS adds a canvas element to the div, all it needs
+    -- is the id and an explicit size (height or width).
     HH.div
       [ HP.id diagramDivId
       , HCSS.style do
-          CSS.flexGrow 1.0
-          CSS.height (CSS.px 500.0)
-          CSS.backgroundColor (CSS.white)
-          CSS.position CSS.relative
-          CSS.cursor CSS.Cursor.default
+          CSS.height (CSS.pct 100.0)
       ]
-      []
+      [  ]
 
 handleAction :: forall m nodeData linkData s. MonadEffect m => String -> MkDiagram nodeData linkData -> Action -> H.HalogenM (State s) Action () Void m Unit
 handleAction diagramDivId mkDiagram = case _ of

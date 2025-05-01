@@ -1,65 +1,78 @@
 module Component.Diagram.TimeSeries where
 
--- import Prelude
+import Prelude
 
--- import Backend (DiagramData(..))
--- import Component.Diagram as Diagram
--- import Control.Monad.State (modify)
--- import Data.Array.NonEmpty (NonEmptyArray, length, mapWithIndex, singleton, tail, toArray)
--- import Data.Maybe (Maybe(..))
--- import Diagram.Surface as Diagram.Surface
--- import Diagram.TimeSeries (mkDataPointNode)
--- import Diagram.TimeSeries as TimeSeries
--- import Effect.Class (class MonadEffect)
--- import Halogen as H
--- import Type.Data.Peano (class IsNat)
--- import Type.Data.Peano.Nat (Nat, D50, reflectNat)
--- import Type.Prelude (Proxy(..))
--- import Unsafe.Coerce (unsafeCoerce)
+import Backend (DiagramData(..))
+import Component.Diagram as Diagram
+import Control.Monad.State (modify)
+import Data.Array (length, mapWithIndex, singleton, tail, (..))
+import Data.Maybe (Maybe(..))
+import Data.Reflectable (class Reflectable, reflectType)
+import Diagram.TimeSeries as Diagram.TimeSeries
+import Effect.Class (class MonadEffect)
+import Halogen as H
+import Type.Prelude (Proxy(..))
+import Unsafe.Coerce (unsafeCoerce)
+
+data Query b a = Receive b a
 
 
--- data Query a = ReceiveEnergy { fitness :: Number, betaCounter :: Int } a
+newtype Queue (n :: Int) (a :: Type) = Queue { vals :: Array a }
 
--- -- We keep curSize for efficiency, so we don't have to traverse the list every time
--- newtype Queue (n :: Nat) (a :: Type) = Queue { vals :: NonEmptyArray a }
+queue :: forall @n a. Queue n a
+queue = Queue { vals: [] }
 
--- queue :: forall @n a. a -> Queue n a
--- queue a = Queue { vals: singleton a }
+enqueue :: forall (n :: Int) a. Reflectable n Int => a -> Queue n a -> Queue n a
+enqueue val (Queue { vals }) =
+  let
+    newVals = vals <> singleton val
+  in
+    Queue
+      { vals:
+          if length newVals > (reflectType (Proxy @n)) then
+            case tail newVals of
+              Just t -> t
+              Nothing -> unsafeCoerce newVals -- Safe because we just checked that newVals longer than maxSize
+          else newVals
+      }
 
--- enqueue :: forall n a. IsNat n => a -> Queue n a -> Queue n a
--- enqueue val (Queue { vals }) =
---   let
---     newVals = vals <> singleton val
---   in
---     Queue
---       { vals:
---           if length newVals > (reflectNat (Proxy @n)) then
---             unsafeCoerce (tail newVals) -- Safe because we just checked that newVals longer than maxSize
---           else newVals
---       }
+queueToDiagramData :: forall n a nodeData linkData. Reflectable n Int => (Int -> a -> Record nodeData) -> (Int -> Record linkData) -> Queue n a -> DiagramData nodeData linkData
+queueToDiagramData f g (Queue { vals }) =
+  let
+    nodes = mapWithIndex f vals
+    links = map g (0 .. (length vals - 2))
+  in
+    DiagramData { nodes, links }
 
--- queueToDiagramData :: forall n a nodeData linkData. IsNat n => (Int -> a -> Record nodeData) -> Queue n a -> DiagramData nodeData linkData
--- queueToDiagramData f (Queue { vals }) =
---   let
---     nodes = toArray $ mapWithIndex f vals
---   in
---     DiagramData { nodes, links: [] }
+handleQuery
+  :: forall n m b dp a nodeData linkData
+   . Reflectable n Int
+  => MonadEffect m
+  => (b -> dp)
+  -> (Int -> dp -> Record nodeData)
+  -> (Int -> Record linkData)
+  -> Query b a
+  -> H.HalogenM (Diagram.State (Queue n dp)) Diagram.Action () Void m (Maybe a)
+handleQuery receiveToDatapoint toNode toLink = case _ of
+  -- Here we'll talk to GoJS
+  Receive msg a -> do
+    modify (\x -> x { state = enqueue (receiveToDatapoint msg) x.state }) >>= \x -> case x.diagram of
+      Just d -> do
+        Diagram.updateDiagram d (queueToDiagramData toNode toLink x.state) a
+      Nothing -> pure $ Just a
 
--- handleQuery
---   :: forall n m a nodeData linkData
---    . IsNat n
---   => MonadEffect m
---   => ({ fitness :: Number, betaCounter :: Int } -> a)
---   -> Query a
---   -> H.HalogenM (Diagram.State (Queue n a)) Diagram.Action () Void m (Maybe a)
--- handleQuery f = case _ of
---   -- Here we'll talk to GoJS
---   ReceiveEnergy msg a -> do
---     modify (\x -> x { state = enqueue (f msg) x.state }) >>= \x -> case x.diagram of
---       Just d -> do
---         Diagram.updateDiagram d (queueToDiagramData  x.state) a
---       Nothing -> pure $ Just a
-
--- component :: forall i m. String -> Number -> MonadEffect m => H.Component Query i Void m
--- component divId firstDatapoint 
---   = Diagram.diagramComponent (queue @D50 { fitness: firstDatapoint, betaCounter: 0 }) Diagram.Surface.diag handleQuery
+component
+  :: forall @queueSize i m b dp nodeData linkData
+   . MonadEffect m
+  => Reflectable queueSize Int
+  => String
+  -> (b -> dp)
+  -> (Int -> dp -> Record nodeData)
+  -> (Int -> Record linkData)
+  -> H.Component (Query b) i Void m
+component divId toDatapoint toNode toLink = Diagram.diagramComponent (queue @queueSize) divId Diagram.TimeSeries.diag
+  ( handleQuery
+      toDatapoint
+      toNode
+      toLink
+  )

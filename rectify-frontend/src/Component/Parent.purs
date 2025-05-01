@@ -7,12 +7,14 @@ import Backend (Solution(..))
 import Backend as Backend
 import Backend.Surface (fromSurfaceSolution)
 import Backend.TSP (fromTSPSolutionData)
+import Backend.TimeSeries (TemperatureData, EnergyData)
 import CSS as CSS
 import Component.Banner as Banner
 import Component.Button as Button
 import Component.Diagram.Canvas as Canvas
 import Component.Diagram.Energy as Energy
 import Component.Diagram.Temperature as Temperature
+import Component.Diagram.TimeSeries as TimeSeries
 import Component.Tabs as Tabs
 import Data.Maybe (Maybe(..))
 import Effect.Aff.Class (class MonadAff)
@@ -72,11 +74,11 @@ handleQuery :: forall m output q a. Query a -> H.HalogenM ComponentState Action 
 handleQuery q = case q of
   PropagateBackendData str a -> do
     H.tell _canvas inds.canvas <<< Canvas.ReceiveDiagramData $ solData str
-    H.tell _temperature inds.temperature (Temperature.ReceiveTemperature { beta: str.beta, betaCounter: str.betaCounter })
-    H.tell _energy inds.energy (Energy.ReceiveEnergy { fitness: str.fitness, betaCounter: str.betaCounter })
+    H.tell _temperature inds.temperature (TimeSeries.Receive { beta: str.beta, betaCounter: str.betaCounter })
+    H.tell _energy inds.energy (TimeSeries.Receive { fitness: str.fitness, betaCounter: str.betaCounter })
     pure (Just a)
-  AlgorithmChange initialState alg a -> do
-    H.tell _canvas inds.canvas (Canvas.AlgorithmChange (solData initialState) alg)
+  AlgorithmChange str alg a -> do
+    H.tell _canvas inds.canvas (Canvas.AlgorithmChange (solData str) alg)
     pure (Just a)
 
 type Slots q =
@@ -85,8 +87,8 @@ type Slots q =
   , button :: Slot q Button.Output Int
   , tabs :: Slot q Tabs.Output Int
   , canvas :: Slot Canvas.Query Void Int
-  , temperature :: Slot Temperature.Query Void Int
-  , energy :: Slot Energy.Query Void Int
+  , temperature :: Slot (TimeSeries.Query TemperatureData) Void Int
+  , energy :: Slot (TimeSeries.Query EnergyData) Void Int
   )
 
 render :: forall m s q. MonadEffect m => s -> H.ComponentHTML Action (Slots q) m
@@ -103,7 +105,8 @@ render _ =
         [ HH.div -- Canvas container
             [ HCSS.style do
                 CSS.flexGrow 1.0 -- Canvas takes remaining horizontal space
-                -- The height is set within Canvas.purs (500px)
+                CSS.height (CSS.px 500.0)
+                CSS.width (CSS.px 500.0)
             ]
             [ HH.slot_ _canvas inds.canvas Canvas.component unit ]
         , HH.div -- Side graphs container
@@ -114,20 +117,23 @@ render _ =
                 CSS.height (CSS.px 500.0) -- Match canvas height
             ]
             [ 
-              HH.div -- Temperature container
-                [ HCSS.style do
-                    CSS.height (CSS.pct 50.0) -- Takes top 50% height
-                    CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
-                    CSS.boxSizing CSS.borderBox
-                ]
-                [ HH.slot_ _temperature inds.temperature (Temperature.component 0.0) unit ]
-            , HH.div -- Energy container
-                [ HCSS.style do
-                    CSS.height (CSS.pct 50.0) -- Takes bottom 50% height
-                    CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
-                    CSS.boxSizing CSS.borderBox
-                ]
-                [ HH.slot_ _energy inds.energy (Energy.component 0.0) unit ]
+            -- TODO: Implement a constant time queue before coming back to
+            -- the time series diagrams. There's too many O(n) operations being done.
+            
+            --   HH.div -- Temperature container
+            --     [ HCSS.style do
+            --         CSS.height (CSS.px 250.0) -- Takes top 50% height
+            --         CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
+            --         CSS.boxSizing CSS.borderBox
+            --     ]
+            --     [ HH.slot_ _temperature inds.temperature Temperature.component unit ]
+            -- , HH.div -- Energy container
+            --     [ HCSS.style do
+            --         CSS.height (CSS.px 250.0) -- Takes top 50% height
+            --         CSS.border CSS.solid (CSS.px 1.0) CSS.black -- Basic border for visualization
+            --         CSS.boxSizing CSS.borderBox
+            --     ]
+            --     [ HH.slot_ _energy inds.energy Energy.component unit ]
             ]
         ]
     , HH.slot _button inds.button Button.component unit buttonAct -- Button below the canvas/graphs area

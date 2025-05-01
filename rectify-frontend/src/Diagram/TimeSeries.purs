@@ -2,10 +2,11 @@ module Diagram.TimeSeries where
 
 import Prelude
 
+import Data.Array ((!!))
 import Data.Int (toNumber)
 import Data.Maybe (Maybe(..))
 import GoJS.Debug (ffilog, trace)
-import GoJS.Diagram (Diagram_, _initialAutoScale)
+import GoJS.Diagram (Diagram_)
 import GoJS.Diagram.Properties (_allowMove, _allowZoom)
 import GoJS.Geometry.Point.Static as Point
 import GoJS.GraphObject.Types (class IsPanel, Link_, Node_)
@@ -51,7 +52,7 @@ mkDataPointNode :: Int -> Number -> Int -> Number -> Record NodeData
 mkDataPointNode x y time value =
   { key: "t_" <> show time
   , category: if time == 0 then presentDataPointCategory else pastDataPointCategory
-  , loc: trace $ show (toNumber x) <> " " <> show y
+  , loc: show (toNumber x) <> " " <> show y
   , time: toNumber time
   , value: value
   }
@@ -80,13 +81,18 @@ dataPointToolTip =
         set { row: 1, column: 1 }
         binding @"text" @"value" (Just show) Nothing
 
-invisibleNodeTemplate :: MadeGraphObject NodeData Node_ Node_
-invisibleNodeTemplate = node @Auto' do
-  set { desiredSize: SizeBoth 1.0 }
-  binding @"location" @"loc" (Just (Point.parse_ <<< trace)) Nothing
+pastDataPointTemplate :: MadeGraphObject NodeData Node_ Node_
+pastDataPointTemplate = node @Auto' do
+  shape Circle $ do
+    set { fill: "grey"
+        , stroke: "black"
+        , strokeWidth: 0.5
+        , desiredSize: SizeBoth 1.0
+        }
+  binding @"location" @"loc" (Just Point.parse_) Nothing
 
-dataNodeTemplate :: MadeGraphObject NodeData Node_ Node_
-dataNodeTemplate = node @Auto' do
+presentDataPointTemplate :: MadeGraphObject NodeData Node_ Node_
+presentDataPointTemplate = node @Auto' do
   shape Circle $ do
     set
       { fill: "dodgerblue"
@@ -105,15 +111,16 @@ dataLinkTemplate = link do
 diag :: Array (Record NodeData) -> Array (Record LinkData) -> MakeDiagram NodeData LinkData Diagram_ Unit
 diag initialNodeData initialLinkData = do
   attach
-    { "undoManager.isEnabled": false
+    { "undoManager.isEnabled": false,
+      "grid.visible": true
     }
-  addNodeTemplate pastDataPointCategory invisibleNodeTemplate
-  addNodeTemplate presentDataPointCategory dataNodeTemplate
+  addNodeTemplate pastDataPointCategory pastDataPointTemplate
+  addNodeTemplate presentDataPointCategory presentDataPointTemplate
   addLinkTemplate linkCategory dataLinkTemplate
 
   graphLinksModel do
     set
-      { nodeDataArray: initialNodeData
+      { nodeDataArray: trace initialNodeData
       , linkDataArray: initialLinkData
       , linkKeyProperty: Property "key"
       , linkFromKeyProperty: Property "from"
