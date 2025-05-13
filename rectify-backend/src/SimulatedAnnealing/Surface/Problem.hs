@@ -79,8 +79,9 @@ freeEnergy initialGrayMatter (Surface inner outer) = Energy $ whiteMatter + (1.0
 acceptanceProbability :: Energy -> Energy -> Temperature -> Probability
 acceptanceProbability energyState energyNeighbor temperature
   | energyNeighbor < energyState = 1.0
-  | temperature <= 0.0 = 1.0
-  | otherwise = Probability $ exp (unEnergy (energyState - energyNeighbor) / unTemperature temperature)
+  | otherwise = 0.0
+  -- | temperature <= 0.0 = 1.0
+  -- | otherwise = Probability $ exp (unEnergy (energyState - energyNeighbor) / unTemperature temperature)
 
 seed :: SMGen
 seed = mkSMGen 12345

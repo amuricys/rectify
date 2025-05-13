@@ -53,32 +53,8 @@ instance ToJSON (FinnRandoSolution n) where
 -- \]
 acceptanceProbability :: Double -> Double -> Double -> Probability
 acceptanceProbability energyState energyNeighbor temperature
-  | energyNeighbor < energyState =
-      pTraceShow
-        ( "\nbeta: "
-            <> show temperature
-            <> "\nenergy: "
-            <> show energyState
-            <> "\nneighbor: "
-            <> show energyNeighbor
-            <> "\naccept prob: "
-            <> show (exp (energyState - energyNeighbor) / temperature)
-            <> "\n"
-        )
-        1.0
-  | otherwise =
-      pTraceShow
-        ( "\nbeta: "
-            <> show temperature
-            <> "\nenergy: "
-            <> show energyState
-            <> "\nneighbor: "
-            <> show energyNeighbor
-            <> "\naccept prob: "
-            <> show (min 1.0 $ Probability $ exp ((energyState - energyNeighbor) / temperature))
-            <> "\n"
-        )
-        min 1.0 $ Probability $ exp ((energyState - energyNeighbor) / temperature)
+  | energyNeighbor < energyState = 1.0
+  | otherwise = min 1.0 $ Probability $ exp ((energyState - energyNeighbor) / temperature)
 
 isingAcceptance ::
   -- | energyState

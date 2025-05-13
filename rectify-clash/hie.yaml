@@ -1,12 +1,12 @@
 cradle:
   cabal:
     - path: "./src"
-      component: "lib:simple"
+      component: "lib:reservoir"
     - path: "./tests/doctests.hs"
-      component: "simple:doctests"
+      component: "reservoir:doctests"
     - path: "./tests"
-      component: "simple:test-library"
+      component: "reservoir:test-library"
     - path: "./bin/Clashi.hs"
-      component: "simple:exe:clashi"
+      component: "reservoir:exe:clashi"
     - path: "./bin/Clash.hs"
-      component: "simple:exe:clash"
+      component: "reservoir:exe:clash"
