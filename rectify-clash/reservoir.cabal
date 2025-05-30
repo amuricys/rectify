@@ -2,8 +2,8 @@ cabal-version:       2.4
 name:                reservoir
 version:             0.1
 license:             BSD-2-Clause
-author:              John Smith <john@example.com>
-maintainer:          John Smith <john@example.com>
+author:              André Muricy <x@example.com>
+maintainer:          André Muricy <x@example.com>
 
 common common-options
   default-extensions:
@@ -78,7 +78,10 @@ common common-options
     clash-prelude >= 1.8.2 && < 1.10,
     ghc-typelits-natnormalise,
     ghc-typelits-extra,
-    ghc-typelits-knownnat
+    ghc-typelits-knownnat,
+    clash-shake,
+    shake
+
 
 
 library
@@ -86,7 +89,8 @@ library
   hs-source-dirs: src
   exposed-modules:
     Reservoir.Project
-  other-modules:
+    Reservoir.Matrix
+  other-modules: 
   default-language: Haskell2010
 
 -- Builds the executable 'clash', with reservoir project in scope

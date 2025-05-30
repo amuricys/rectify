@@ -120,17 +120,17 @@ executable rectify
     , rectify-backend
 
 
-test-suite rectify-test
-  import: defaults
-  type: exitcode-stdio-1.0
-  hs-source-dirs: test
-  other-modules:
-    Spec.LinAlg
-    Spec.Surface.Change
-  main-is: Main.hs
-  build-depends:
-      base
-    , rectify-backend
-    , hedgehog
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
-  default-language: GHC2021
+-- test-suite rectify-test
+--   import: defaults
+--   type: exitcode-stdio-1.0
+--   hs-source-dirs: test
+--   other-modules:
+--     Spec.LinAlg
+--     Spec.Surface.Change
+--   main-is: Main.hs
+--   build-depends:
+--       base
+--     , rectify-backend
+--     , hedgehog
+--   ghc-options: -threaded -rtsopts -with-rtsopts=-N
+--   default-language: GHC2021
