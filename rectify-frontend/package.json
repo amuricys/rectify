@@ -1,12 +1,10 @@
 {
   "scripts": {
-    "bundle": "spago bundle",
-    "serve": "parcel serve index.html --open"
+    "build": "spago build",
+    "bundle": "spago bundle --bundle-type app --platform browser --minify --outfile dist/app.js",
+    "serve": "esbuild output/Main/index.js --serve=127.0.0.1:8000 --outdir=dist/js --bundle --servedir=dist --watch"
   },
   "dependencies": {
     "gojs": "^2.3.11"
-  },
-  "devDependencies": {
-    "parcel": "^2.13.3"
   }
 }

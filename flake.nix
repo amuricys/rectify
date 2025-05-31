@@ -23,8 +23,7 @@
         pkgs     = import nixpkgs { inherit system overlays;config = { allowUnfree = true; }; };
 
         # ──────────── Backend (Cabal) ─────────────────────────────────────
-        backend = pkgs.haskellPackages.callCabal2nix "rectify-backend"
-                    ./rectify-backend {};
+        backend = pkgs.haskellPackages.callCabal2nix "rectify-backend" ./rectify-backend {};
 
         # Create a custom Haskell package set with Clash and plugins
         rectify-clash-base = pkgs.haskellPackages.callCabal2nix "rectify-clash" ./rectify-clash {};
@@ -34,23 +33,18 @@
         rectify-clash = pkgs.stdenv.mkDerivation {
           pname = "rectify-clash";
           version = "0.1";
-          src = ./rectify-clash;
-#          dontUnpack = true;
-          
+          src = ./rectify-clash;          
           nativeBuildInputs = [
-            pkgs.cabal-install
+            # Needed because the clash binary needs the plugins at runtime
             (pkgs.haskellPackages.ghcWithPackages (p:
               rectify-clash-base.propagatedBuildInputs
             ))
-            rectify-clash-base
           ];
           
           installPhase = ''
             echo "🏗 Generating Verilog with Clash"
-            ls
             mkdir -p $out
             
-            # Use the clash executable built by your cabal file
             ${rectify-clash-base}/bin/clash --verilog -isrc Reservoir.Project -fclash-hdldir $out
           '';
         };
@@ -60,83 +54,102 @@
           pname = "rectify-frontend";
           version = "0.1";
           src = ./rectify-frontend;
-          buildInputs = [ pkgs.spago-unstable pkgs.purs pkgs.nodejs ];
+          
+          buildInputs = with pkgs; [ 
+            spago-unstable 
+            purs 
+            purs-backend-es  # ES module backend
+            nodejs 
+            nodePackages.vite 
+          ];
+          
           buildPhase = ''
-            spago build --purs-args "--censor-lib-warnings"
-            spago bundle-app --main Main --to dist/index.js
+            # Install npm dependencies
+            npm install
+            
+            # Build PureScript to ES modules
+            spago build --purs-args "--codegen corefn"
+            purs-backend-es build
+            
+            # Bundle with Vite
+            vite build
           '';
+          
           installPhase = ''
             mkdir -p $out
-            cp -r dist $out/
-            cp index.html $out/
+            cp -r dist/* $out/
           '';
         };
 
-        # ──────────── libf1wrap (C bridge) ─────────────────────────────────
-        libf1wrap = pkgs.stdenv.mkDerivation {
-          pname = "libf1wrap";
+        # ──────────── libf2wrap (C bridge) ─────────────────────────────────
+        libf2wrap = pkgs.stdenv.mkDerivation {
+          pname = "libf2wrap";
           version = "0.1";
-          src = ./infra/libf1wrap;
+          src = ./infra/libf2wrap;
           nativeBuildInputs = [ pkgs.cmake ];
           buildInputs       = [ pkgs.aws-fpga-tools.dev.pci ];
           installPhase = ''
             mkdir -p $out/lib
-            cp libf1wrap.so $out/lib/
+            cp libf2wrap.so $out/lib/
           '';
         };
 
+      infra = 
+        terranix.lib.terranixConfiguration {
+          inherit system;
+          modules = [ ./infra/aws-ec2.nix ];
+          extraArgs.backend = self.packages.${system}.rectify-backend;
+        };
       in {
         # ---------------- Exported artefacts -----------------------------
         packages = {
           rectify-backend = backend;
           rectify-frontend = frontend;
           rectify-clash = rectify-clash;
-          libf1wrap = libf1wrap;
-          pkgs = pkgs;
+          libf2wrap = libf2wrap;
+          infra = infra;
         };
 
         defaultPackage = backend;
 
         # ---------------- Developer shell --------------------------------
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-              (haskellPackages.ghcWithPackages (p: [
-                p.ghc-typelits-knownnat
-                ]))
-            ];          
-            packages = with pkgs; [
-            # PureScript
-            purs 
-            spago-unstable 
-            purescript-language-server 
-            nodejs
-            # Haskell
-            ghc 
-            cabal-install 
-            haskellPackages.haskell-language-server 
-            ghcid
-            zlib
-            # Clash & FPGA local sim
-            rectify-clash
-
-            # (haskellPackages.ghcWithPackages (p: rectify-clash.propagatedBuildInputs))
-            
-            verilator
-            # Infra
-            terraform
-           # terranix.packages.${system}.terranix-cli
-            awscli2
-          ];
-          CLASH_OPTS = "--verilog -outputdir verilog-out";
+        devShells.default = pkgs.mkShell {          
+          packages = with pkgs; [
+          # PureScript
+          purs 
+          spago-unstable 
+          purescript-language-server 
+          nodejs
+          # frontend
+          esbuild
+          # Haskell
+          ghc 
+          cabal-install 
+          haskellPackages.haskell-language-server 
+          ghcid
+          zlib
+          # Clash & FPGA local sim
+          rectify-clash
+          verilator
+          # Infra
+          terraform
+          # terranix.packages.${system}.terranix-cli
+          awscli2
+        ];
+        CLASH_OPTS = "--verilog -outputdir verilog-out";
         };
-      }) // {
-
-      # ================= Terranix output ================================
-      terranixConfigurations.default = terranix.lib.terranixConfiguration {
-        system  = "x86_64-linux";
-        modules = [ ./infra/terraform/aws-f1.nix ];
-      };
-  };
+      devShells.deploy = pkgs.mkShell {
+        inputsFrom = [ self.packages.${system}.infra ];
+        packages = [
+          pkgs.terraform
+          pkgs.awscli2
+          ];
+        shellHook = ''
+          touch config.tf.json
+          cp ${infra} config.tf.json
+        '';
+        };
+      });
 }
 
 

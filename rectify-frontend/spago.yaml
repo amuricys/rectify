@@ -22,11 +22,11 @@ package:
     main: Test.Main
     dependencies: []
 workspace:
-  build_opts:
-    censor_library_warnings: all
-  package_set:
-    registry: 47.13.0
-  extra_packages:
+  buildOpts:
+    censorLibraryWarnings: all
+  packageSet:
+    registry: 64.10.0
+  extraPackages:
     went:
       path: ../../went-stuff/purescript-went
     gojs:
