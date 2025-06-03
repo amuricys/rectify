@@ -1,155 +1,211 @@
 {
-  description = "A monorepo for Haskell backend and PureScript frontend";
+  description = "A monorepo for Haskell backend + PureScript frontend";
 
-  nixConfig = {
-    allow-import-from-derivation = true; # Still needs to run with the flag for nix flake show
-  };
+  nixConfig.allow-import-from-derivation = true;
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    terranix.url      = "github:terranix/terranix";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    terranix.url = "github:terranix/terranix";
+    mkSpagoDerivation.url = "github:jeslie0/mkSpagoDerivation";
     purescript-overlay.url = "github:thomashoneyman/purescript-overlay";
     purescript-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    lean4-nix.url = "github:lenianiva/lean4-nix";
+    lean4-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-
-
-
-  outputs = { self, nixpkgs, flake-utils, terranix, purescript-overlay, ... }:
+  outputs = { self, nixpkgs, flake-utils, flake-parts, terranix, mkSpagoDerivation
+    , purescript-overlay, lean4-nix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ purescript-overlay.overlays.default ];
-        pkgs     = import nixpkgs { inherit system overlays;config = { allowUnfree = true; }; };
+        # ─────────────────────────────────────────────────────────────
+        overlays = [
+          mkSpagoDerivation.overlays.default
+          purescript-overlay.overlays.default
+          (lean4-nix.readToolchainFile ./rectify-lean/lean-toolchain)
+        ];
+        pkgs = import nixpkgs {
+          inherit system overlays;
+          config = { allowUnfree = true; };
+        };
 
-        # ──────────── Backend (Cabal) ─────────────────────────────────────
-        backend = pkgs.haskellPackages.callCabal2nix "rectify-backend" ./rectify-backend {};
+        # ──────────── ❶   Haskell backend  ───────────────────────────
+        backend =
+          pkgs.haskellPackages.callCabal2nix "rectify-backend" ./rectify-backend
+          { };
 
-        # Create a custom Haskell package set with Clash and plugins
-        rectify-clash-base = pkgs.haskellPackages.callCabal2nix "rectify-clash" ./rectify-clash {};
+        # ──────────── ❷   Clash bitstream  ───────────────────────────
+        rectify-clash-base =
+          pkgs.haskellPackages.callCabal2nix "rectify-clash" ./rectify-clash
+          { };
 
-        # ──────────── Clash bitstream (Verilog stage) ─────────────────────
-        ###############################################################################
         rectify-clash = pkgs.stdenv.mkDerivation {
           pname = "rectify-clash";
-          version = "0.1";
-          src = ./rectify-clash;          
+          version = "0.1.0";
+          src = ./rectify-clash;
           nativeBuildInputs = [
-            # Needed because the clash binary needs the plugins at runtime
-            (pkgs.haskellPackages.ghcWithPackages (p:
-              rectify-clash-base.propagatedBuildInputs
-            ))
+            (pkgs.haskellPackages.ghcWithPackages
+              (p: rectify-clash-base.propagatedBuildInputs))
           ];
-          
           installPhase = ''
-            echo "🏗 Generating Verilog with Clash"
             mkdir -p $out
-            
-            ${rectify-clash-base}/bin/clash --verilog -isrc Reservoir.Project -fclash-hdldir $out
+            echo "🏗  Generating Verilog with Clash"
+            ${rectify-clash-base}/bin/clash \
+                --verilog -isrc Reservoir.Project -fclash-hdldir $out
           '';
         };
 
-        # ──────────── PureScript frontend (manual spago) ───────────────────
-        frontend = pkgs.stdenv.mkDerivation {
-          pname = "rectify-frontend";
-          version = "0.1";
+        # ──────────── ❸   PureScript compile (offline)  ──────────────
+        #
+        # This vendors the contents of spago.lock, so it never hits the
+        # registry.  Resulting JS lives in  $ps-out/output/
+        #
+        frontend = pkgs.mkSpagoDerivation {
           src = ./rectify-frontend;
-          
-          buildInputs = with pkgs; [ 
-            spago-unstable 
-            purs 
-            purs-backend-es  # ES module backend
-            nodejs 
-            nodePackages.vite 
+          nativeBuildInputs = [
+            pkgs.esbuild
+            pkgs.purs-backend-es
+            pkgs.purs-unstable
+            pkgs.spago-unstable
           ];
-          
           buildPhase = ''
-            # Install npm dependencies
-            npm install
-            
-            # Build PureScript to ES modules
-            spago build --purs-args "--codegen corefn"
-            purs-backend-es build
-            
-            # Bundle with Vite
-            vite build
+            spago bundle --bundle-type app \
+                         --platform browser \
+                         --minify \
+                         --outfile dist/app.js
           '';
-          
           installPhase = ''
             mkdir -p $out
             cp -r dist/* $out/
           '';
+          buildNodeModulesArgs = {
+            npmRoot = ./rectify-frontend;
+            nodejs = pkgs.nodejs;
+          };
         };
 
-        # ──────────── libf2wrap (C bridge) ─────────────────────────────────
+        rectify-lean = pkgs.lean.buildLeanPackage {
+          name = "Rectify";
+          # roots = ["Rectify"];
+          src = ./rectify-lean;
+        };
+        #   pkgs.stdenv.mkDerivation {
+        #   pname = "rectify-lean";
+        #   version = "0.1.0";
+        #   src = ./rectify-lean;
+
+        #   buildInputs = with pkgs; [ elan lean4 libwebsockets ];
+
+        #   nativeBuildInputs = with pkgs; [ pkg-config ];
+
+        #   buildPhase = ''
+        #     # First build the FFI library
+        #     mkdir -p .lake/build/lib
+        #     gcc -c -fPIC -I${pkgs.lean4}/include ffi/websocket.c \
+        #         $(pkg-config --cflags libwebsockets) \
+        #         -o .lake/build/lib/websocket_ffi.o
+        #     ar rcs .lake/build/lib/libwebsocket_ffi.a .lake/build/lib/websocket_ffi.o
+
+        #     # Then build with Lake
+        #     export LEAN_PATH=${pkgs.lean4}/lib/lean
+        #     lake build
+        #   '';
+
+        #   installPhase = ''
+        #     mkdir -p $out/bin
+        #     cp .lake/build/bin/rectify_ws $out/bin/
+
+        #     # Create wrapper with library paths
+        #     wrapProgram $out/bin/rectify_ws \
+        #       --prefix LD_LIBRARY_PATH : ${
+        #         pkgs.lib.makeLibraryPath [ pkgs.libwebsockets ]
+        #       }
+        #   '';
+        # };
+
+        # ──────────── ❺   C shim library  ────────────────────────────
         libf2wrap = pkgs.stdenv.mkDerivation {
           pname = "libf2wrap";
           version = "0.1";
           src = ./infra/libf2wrap;
           nativeBuildInputs = [ pkgs.cmake ];
-          buildInputs       = [ pkgs.aws-fpga-tools.dev.pci ];
+          buildInputs = [ pkgs.aws-fpga-tools.dev.pci ];
           installPhase = ''
             mkdir -p $out/lib
             cp libf2wrap.so $out/lib/
           '';
         };
 
-      infra = 
-        terranix.lib.terranixConfiguration {
+        # ──────────── ❻   Terranix / Terraform config  ───────────────
+        infra = terranix.lib.terranixConfiguration {
           inherit system;
-          modules = [ ./infra/aws-ec2.nix ];
-          extraArgs.backend = self.packages.${system}.rectify-backend;
+          modules = [
+            ./infra/aws-ec2.nix # back-end EC2
+            ./infra/aws-s3-frontend.nix # static site + HTTPS
+          ];
+          extraArgs = {
+            backend = backend;
+            frontend = frontend;
+          };
         };
+
       in {
-        # ---------------- Exported artefacts -----------------------------
+
+        # ~~~~~~~~~~~~~ exposed artefacts ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         packages = {
-          rectify-backend = backend;
-          rectify-frontend = frontend;
-          rectify-clash = rectify-clash;
+          backend = backend;
+          frontend = frontend;
+          clash = rectify-clash;
+      #    rectify-lean = rectify-lean.executable;
           libf2wrap = libf2wrap;
           infra = infra;
         };
 
         defaultPackage = backend;
 
-        # ---------------- Developer shell --------------------------------
-        devShells.default = pkgs.mkShell {          
+        # ~~~~~~~~~~~~~ Dev shells ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-          # PureScript
-          purs 
-          spago-unstable 
-          purescript-language-server 
-          nodejs
-          # frontend
-          esbuild
-          # Haskell
-          ghc 
-          cabal-install 
-          haskellPackages.haskell-language-server 
-          ghcid
-          zlib
-          # Clash & FPGA local sim
-          rectify-clash
-          verilator
-          # Infra
-          terraform
-          # terranix.packages.${system}.terranix-cli
-          awscli2
-        ];
-        CLASH_OPTS = "--verilog -outputdir verilog-out";
-        };
-      devShells.deploy = pkgs.mkShell {
-        inputsFrom = [ self.packages.${system}.infra ];
-        packages = [
-          pkgs.terraform
-          pkgs.awscli2
+            # PureScript
+            purs
+            spago-unstable
+            purescript-language-server
+            nodejs
+            esbuild
+
+            # Haskell
+            ghc
+            cabal-install
+            haskellPackages.haskell-language-server
+            ghcid
+            zlib
+
+            # FPGA / Clash
+            rectify-clash
+            verilator
+
+            # Lean
+            lean.lean-all
+            libwebsockets
+            openssl.dev
+            elan
+      #      rectify-lean.executable
+            
+            # Infra tooling
+            terraform
+            awscli2
           ];
-        shellHook = ''
-          touch config.tf.json
-          cp ${infra} config.tf.json
-        '';
+          CLASH_OPTS = "--verilog -outputdir verilog-out";
+        };
+
+        devShells.deploy = pkgs.mkShell {
+          inputsFrom = [ infra ];
+          packages = [ pkgs.terraform pkgs.awscli2 ];
+          shellHook = ''
+            touch config.tf.json
+            cp ${infra} config.tf.json
+          '';
         };
       });
 }
-
-

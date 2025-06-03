@@ -25,9 +25,9 @@ workspace:
   buildOpts:
     censorLibraryWarnings: all
   packageSet:
-    registry: 64.10.0
+    registry: 47.13.0
   extraPackages:
     went:
-      path: ../../went-stuff/purescript-went
+      path: went-stuff/purescript-went
     gojs:
-      path: ../../went-stuff/purescript-gojs
+      path: went-stuff/purescript-gojs

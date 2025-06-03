@@ -50,8 +50,3 @@ handleAction = case _ of
   StepClicked -> do
     H.raise $ Send Step
 
--- resp <- liftAff $ AX.post
---     AXW.driver
---     ResponseFormat.string
---     "http://localhost:8080/mypostendpoint"
---     (Just $ RequestBody.json $ encodeJson { message: "Hello server" })

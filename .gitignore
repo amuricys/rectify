@@ -14,6 +14,7 @@
 *.spago
 result
 .terraform*
+*.lake
 terraform.tfstate*
 config.tf.json
 !rectify-frontend/dist/index.html
