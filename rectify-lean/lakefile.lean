@@ -4,7 +4,7 @@ open System (FilePath)
 
 package rectify where
   leanOptions := #[⟨`pp.unicode.fun, true⟩, ⟨`pp.proofs.withType, false⟩]
-  moreLinkArgs := #["-lwebsockets"]
+  moreLinkArgs := #["-lwebsockets",  "-lpthread"]
 
 require scilean from git "https://github.com/amuricys/SciLean.git"
 

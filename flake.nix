@@ -189,7 +189,6 @@
             lean.lean-all
             libwebsockets
             openssl.dev
-            elan
       #      rectify-lean.executable
             
             # Infra tooling
