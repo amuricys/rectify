@@ -8,12 +8,10 @@ import Backend.Optimization.Problem.Surface as Surface
 import Backend.Optimization.Problem.TSP as TSP
 import Component.Optimization.Diagram as Diagram
 import Data.Maybe (Maybe(..))
-import Data.Variant (case_, on)
 import Diagram.Surface as Diagram.Surface
 import Diagram.TSP as Diagram.TSP
 import Effect.Class (class MonadEffect)
 import Halogen as H
-import Type.Prelude (Proxy(..))
 
 -- Maybe use https://hackage.haskell.org/package/purescript-bridge for this
 
@@ -23,12 +21,6 @@ canvasDivId = "canvasDiv"
 data Query a
   = ReceiveDiagramData Problem.Problem a
   | ProblemChange Problem.Problem a
-
-ahaha = case_ 
-  # on (Proxy :: Proxy "surface") (\state -> Diagram.initDiagram canvasDivId (Surface.fromSolution state.solution))
-  # on (Proxy :: Proxy "tsp") (\state -> Diagram.initDiagram canvasDivId (TSP.fromSolution state.solution))
-  # on (Proxy :: Proxy "reservoir") (\state -> Diagram.initDiagram canvasDivId (Reservoir.fromSolution state.solution))
-
 initDiagram' prob = case prob of
   Problem.Surface state -> Diagram.initDiagram canvasDivId (Surface.fromSolution state) Diagram.Surface.diag
   Problem.TSP state -> Diagram.initDiagram canvasDivId (TSP.fromSolution state) Diagram.TSP.diag
