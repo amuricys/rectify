@@ -12,7 +12,6 @@ def π : Float := 3.14159265358979323846
 
 inductive DynamicalSystem where
   | harmonicOscillator
-  | doublePendulum
   | lorenzSystem
   | duffingOscillator
   | vanDerPolOscillator
@@ -29,7 +28,6 @@ inductive ServerState where
 structure RunnerState where
   currentSystem : DynamicalSystem
   harmonicOscillator : HarmonicOscillatorState
-  doublePendulum : DoublePendulumState
   lorenzSystem : LorenzState
   duffingOscillator : DuffingState
   vanDerPolOscillator : VanDerPolState
@@ -37,7 +35,6 @@ structure RunnerState where
 
 structure RunnerParams where
   harmonicOscillator : HarmonicOscillatorParams
-  doublePendulum : DoublePendulumParams
   lorenzSystem : LorenzParams
   duffingOscillator : DuffingParams
   vanDerPolOscillator : VanDerPolParams
@@ -45,15 +42,13 @@ structure RunnerParams where
 
 def defaultParams : RunnerParams :=
   { harmonicOscillator := { m := 1.0, k := 1.0 },
-    doublePendulum := { m := 1.0, l := 1.0 },
     lorenzSystem := { σ := 10.0, ρ := 28.0, β := 8.0 / 3.0 },
     duffingOscillator := { δ := 1.0, α := 1.0, β := 1.0, γ := 1.0, ω := 1.0 },
     vanDerPolOscillator := { μ := 1.0 } }
 
 def initialRunnerState : RunnerState :=
   { currentSystem := .harmonicOscillator,
-    harmonicOscillator := { x := 1.0, p := 0.0 },
-    doublePendulum := { θ₁ := π / 4, θ₂ := π / 6, ω₁ := 0.0, ω₂ := 0.0 },
+    harmonicOscillator := { x := 2.0, p := 0.0 },
     lorenzSystem := { x := 1.0, y := 1.0, z := 1.0 },
     duffingOscillator := { x := 1.0, v := 0.0 },
     vanDerPolOscillator := { x := 1.0, y := 0.0 } }
@@ -83,9 +78,6 @@ def handleMessage (state : IO.Ref ServerState) (msg : String) : IO Unit := do
   | "HarmonicOscillator" =>
     state.set (.changingSystem .harmonicOscillator)
     IO.println "Switching to Harmonic Oscillator"
-  | "DoublePendulum" =>
-    state.set (.changingSystem .doublePendulum)
-    IO.println "Switching to Double Pendulum"
   | "LorenzSystem" =>
     state.set (.changingSystem .lorenzSystem)
     IO.println "Switching to Lorenz System"
@@ -100,7 +92,6 @@ def handleMessage (state : IO.Ref ServerState) (msg : String) : IO Unit := do
 def stepRunner (params : RunnerParams) (runnerState : RunnerState) : RunnerState :=
   match runnerState.currentSystem with
   | .harmonicOscillator => { runnerState with harmonicOscillator := harmonicOscillatorSteps params.harmonicOscillator runnerState.harmonicOscillator 0.0 0.0 100 }
-  | .doublePendulum => sorry -- { runnerState with doublePendulum := doublePendulumSteps params.doublePendulum runnerState.doublePendulum 0.0 0.0 100 }
   | .lorenzSystem => { runnerState with lorenzSystem := lorenzSteps params.lorenzSystem runnerState.lorenzSystem 0.0 0.0 100 }
   | .duffingOscillator => { runnerState with duffingOscillator := duffingSteps params.duffingOscillator runnerState.duffingOscillator 0.0 0.0 100 }
   | .vanDerPolOscillator => { runnerState with vanDerPolOscillator := vanDerPolSteps params.vanDerPolOscillator runnerState.vanDerPolOscillator 0.0 0.0 100 }
@@ -108,7 +99,6 @@ def stepRunner (params : RunnerParams) (runnerState : RunnerState) : RunnerState
 def runnerStateToJson (runnerState : RunnerState) : String :=
   match runnerState.currentSystem with
   | .harmonicOscillator => toString (toJson runnerState.harmonicOscillator)
-  | .doublePendulum => toString (toJson runnerState.doublePendulum)
   | .lorenzSystem => toString (toJson runnerState.lorenzSystem)
   | .duffingOscillator => toString (toJson runnerState.duffingOscillator)
   | .vanDerPolOscillator => toString (toJson runnerState.vanDerPolOscillator)

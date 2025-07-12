@@ -1,8 +1,7 @@
-module Component.Tabs where
+module Component.Optimization.Tabs where
 
 import Prelude
 
-import Algorithm (Algorithm(..))
 import CSS as CSS
 import CSS.Cursor as CSS.Cursor
 import CSS.Overflow as CSS.Overflow
@@ -11,9 +10,13 @@ import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Events as HE
 
-newtype Action = Clicked Algorithm
-newtype Output = Selected Algorithm
-newtype State = Current Algorithm
+data OptProblem = Surface | TSP | Reservoir
+
+derive instance eqOptProblem :: Eq OptProblem
+
+newtype Action = Clicked OptProblem
+newtype Output = Selected OptProblem
+newtype State = Current OptProblem
 
 tabArrayStyle :: CSS.StyleM Unit
 tabArrayStyle = do

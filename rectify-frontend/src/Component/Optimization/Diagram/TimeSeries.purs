@@ -1,9 +1,9 @@
-module Component.Diagram.TimeSeries where
+module Component.Optimization.Diagram.TimeSeries where
 
 import Prelude
 
-import Backend (DiagramData(..))
-import Component.Diagram as Diagram
+import Component.Optimization.Diagram (DiagramData(..))
+import Component.Optimization.Diagram as Diagram
 import Control.Monad.State (modify)
 import Data.Array (length, mapWithIndex, singleton, tail, (..))
 import Data.Maybe (Maybe(..))
@@ -58,7 +58,7 @@ handleQuery receiveToDatapoint toNode toLink = case _ of
   Receive msg a -> do
     modify (\x -> x { state = enqueue (receiveToDatapoint msg) x.state }) >>= \x -> case x.diagram of
       Just d -> do
-        Diagram.updateDiagram d (queueToDiagramData toNode toLink x.state) a
+        Diagram.updateDiagram d (queueToDiagramData toNode toLink x.state) *> pure (Just a)
       Nothing -> pure $ Just a
 
 component

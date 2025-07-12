@@ -2,47 +2,62 @@ module Backend where
 
 import Prelude
 
-import Data.Argonaut.Decode (class DecodeJson, decodeJson)
-import Data.Argonaut.Decode.Generic (genericDecodeJson)
-import Data.Argonaut.Encode (class EncodeJson)
-import Data.Argonaut.Encode.Generic (genericEncodeJson)
-import Data.Argonaut.Parser (jsonParser)
-import Data.Bifunctor (lmap)
-import Data.Either (Either)
-import Data.Generic.Rep (class Generic)
+import Backend.Optimization as Optimization
+import Backend.Dynamics as Dynamics
+
+data Payload
+  = Optimization Optimization.Payload 
+  | Dynamics Dynamics.Payload
 
 
-class FromSolution a where
-  fromSolution :: Solution -> a
 
-type SurfaceSolutionData = { inner :: Array BackendPoint, outer :: Array BackendPoint }
-type TSPSolutionData = { cities :: Array BackendPoint }
 
-data Solution
-  = SurfaceSolution SurfaceSolutionData
-  | TSPSolution TSPSolutionData
 
-derive instance Generic Solution _
-instance decodeJsonSolution :: DecodeJson Solution where
-  decodeJson a = genericDecodeJson a
+-- parseBackend :: String -> Either String Payload
 
-instance encodeJsonSolution :: EncodeJson Solution where
-  encodeJson a = genericEncodeJson a
+-- parseBackend = 
+-- ──────────────────────────────────────────────────────
+-- example payloads
 
-type SimState sol =
-  { betaCounter :: Int
-  , beta :: Number
-  , fitness :: Number
-  , solution :: sol
-  }
+x = {"visualize": "optimization"
+    ,"datapoint": {
+      "problem": "surface",
+      "solution": {
+          "inner": [
+            { "x": 0, "y": 0 },
+            { "x": 1, "y": 1 },
+            { "x": 2, "y": 2 }
+          ],
+          "outer": [
+            { "x": 0, "y": 0 },
+            { "x": 1, "y": 1 },
+            { "x": 2, "y": 2 }
+          ]
+      },
+      "optimization-data": {
+        "algorithm": "simulated-annealing",
+        "algorithm-data": {
+          "beta": 0.1,
+          "betaCounter": 0,
+          "fitness": 0.1
+        }
+      }
+    }
+}
 
-type BackendPoint = { x :: Number, y :: Number }
-
-newtype DiagramData nodeData linkData = DiagramData { nodes :: Array (Record nodeData), links :: Array (Record linkData) }
-
-derive newtype instance semigroupDiagramData :: Semigroup (DiagramData nodeData linkData)
-derive newtype instance decodeJsonDiagramData :: (DecodeJson (Record nodeData), DecodeJson (Record linkData)) => DecodeJson (DiagramData nodeData linkData)
-derive newtype instance encodeJsonDiagramData :: (EncodeJson (Record nodeData), EncodeJson (Record linkData)) => EncodeJson (DiagramData nodeData linkData)
-
-parse :: String -> Either String (SimState Solution)
-parse = lmap show <<< decodeJson @(SimState Solution) <=< jsonParser
+y = { "visualize": "dynamics"
+    , "datapoint": {
+      "system": "lorenz",
+      "state": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "params": {
+        "sigma": 10,
+        "rho": 28,
+        "beta": 8/3
+      },
+      "t": 0
+    }
+}

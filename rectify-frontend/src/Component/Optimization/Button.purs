@@ -1,4 +1,4 @@
-module Component.Button where
+module Component.Optimization.Button where
 
 import Prelude
 
@@ -7,7 +7,14 @@ import Data.Show.Generic (genericShow)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
-import RunCommand (RunCommand(..))
+
+
+
+data RunCommand = Pause | Unpause | Step
+derive instance Generic RunCommand _
+instance Show RunCommand where
+  show = genericShow
+
 
 -- Define message and state types
 data Action = PauseClicked | StepClicked

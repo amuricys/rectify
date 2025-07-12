@@ -1,4 +1,3 @@
-import Rectify.Dynamics.DoublePendulum
 import Rectify.Dynamics.DuffingOscillator
 import Rectify.Dynamics.HarmonicOscillator
 import Rectify.Dynamics.Lorenz

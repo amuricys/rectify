@@ -1,9 +1,9 @@
-module Component.Diagram.Energy where
+module Component.Optimization.Diagram.Energy where
 
 import Prelude
 
 import Backend.TimeSeries (EnergyData)
-import Component.Diagram.TimeSeries as Component.TimeSeries
+import Component.Optimization.Diagram.TimeSeries as Component.TimeSeries
 import Diagram.TimeSeries (mkDataPointNode, mkLink)
 import Effect.Class (class MonadEffect)
 import Halogen as H

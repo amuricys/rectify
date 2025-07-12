@@ -1,4 +1,4 @@
-module RunCommand where
+module Component.Optimization.RunCommand where
 
 import Prelude
 

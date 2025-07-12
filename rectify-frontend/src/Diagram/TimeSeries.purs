@@ -2,12 +2,10 @@ module Diagram.TimeSeries where
 
 import Prelude
 
-import Data.Array ((!!))
 import Data.Int (toNumber)
 import Data.Maybe (Maybe(..))
-import GoJS.Debug (ffilog, trace)
+import GoJS.Debug (trace)
 import GoJS.Diagram (Diagram_)
-import GoJS.Diagram.Properties (_allowMove, _allowZoom)
 import GoJS.Geometry.Point.Static as Point
 import GoJS.GraphObject.Types (class IsPanel, Link_, Node_)
 import GoJS.Key (KeyProperty(..))

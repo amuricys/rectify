@@ -5,6 +5,7 @@ package:
     - affjax
     - affjax-web
     - argonaut-codecs
+    - codec-argonaut
     - argonaut-generic
     - console
     - coroutines

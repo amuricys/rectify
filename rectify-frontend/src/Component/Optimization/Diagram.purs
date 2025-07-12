@@ -1,10 +1,8 @@
-module Component.Diagram where
+module Component.Optimization.Diagram where
 
 import Prelude
 
-import Backend (DiagramData(..))
 import CSS as CSS
-import CSS.Cursor as CSS.Cursor
 import Data.Maybe (Maybe(..))
 import Effect.Class (class MonadEffect, liftEffect)
 import GoJS.Diagram (Diagram_, _model)
@@ -19,6 +17,11 @@ import Went.Diagram.Make as Went
 data Action = Initialize
 
 type State s = { state :: s, diagram :: Maybe Diagram_ }
+
+newtype DiagramData nodeData linkData = DiagramData { nodes :: Array (Record nodeData), links :: Array (Record linkData) }
+instance Semigroup (DiagramData nodeData linkData) where
+  append (DiagramData { nodes: nodes1, links: links1 }) (DiagramData { nodes: nodes2, links: links2 }) =
+    DiagramData { nodes: nodes1 <> nodes2, links: links1 <> links2 }
 
 type MkDiagram nodeData linkData = Array (Record nodeData) -> Array (Record linkData) -> MakeDiagram nodeData linkData Diagram_ Unit
 
@@ -56,12 +59,11 @@ handleAction :: forall m nodeData linkData s. MonadEffect m => String -> MkDiagr
 handleAction diagramDivId mkDiagram = case _ of
   Initialize -> initDiagram diagramDivId (DiagramData { nodes: [], links: [] }) mkDiagram
 
-updateDiagram :: forall output m a nodeData linkData s. MonadEffect m => Diagram_ -> DiagramData nodeData linkData -> a -> H.HalogenM (State s) Action () output m (Maybe a)
-updateDiagram diagram (DiagramData { nodes, links }) a = do
+updateDiagram :: forall m nodeData linkData s. MonadEffect m => Diagram_ -> DiagramData nodeData linkData -> H.HalogenM (State s) Action () Void m Unit
+updateDiagram diagram (DiagramData { nodes, links }) = do
   let m = diagram # _model
   liftEffect $ m # mergeNodeDataArray_ nodes
   liftEffect $ m # mergeLinkDataArray_ links
-  pure (Just a)
 
 initDiagram :: forall m nodeData linkData s. MonadEffect m => String -> DiagramData nodeData linkData -> MkDiagram nodeData linkData -> H.HalogenM (State s) Action () Void m Unit
 initDiagram divId (DiagramData initialState) mkDiagram = do

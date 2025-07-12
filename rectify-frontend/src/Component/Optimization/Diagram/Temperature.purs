@@ -1,9 +1,9 @@
-module Component.Diagram.Temperature where
+module Component.Optimization.Diagram.Temperature where
 
 import Prelude
 
 import Backend.TimeSeries (TemperatureData)
-import Component.Diagram.TimeSeries as Component.TimeSeries
+import Component.Optimization.Diagram.TimeSeries as Component.TimeSeries
 import Diagram.TimeSeries (mkDataPointNode, mkLink)
 import Effect.Class (class MonadEffect)
 import Halogen as H

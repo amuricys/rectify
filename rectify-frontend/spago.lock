@@ -10,6 +10,7 @@
             "affjax-web",
             "argonaut-codecs",
             "argonaut-generic",
+            "codec-argonaut",
             "console",
             "coroutines",
             "css",
@@ -36,6 +37,8 @@
             "avar",
             "bifunctors",
             "catenable-lists",
+            "codec",
+            "codec-argonaut",
             "colors",
             "console",
             "const",
@@ -792,6 +795,28 @@
         "prelude",
         "tuples",
         "unfoldable"
+      ]
+    },
+    "codec": {
+      "type": "registry",
+      "version": "6.1.0",
+      "integrity": "sha256-6vMLNlsJxQarVQ9cn1FYfl5x6opfzxAza15SzRdxFxQ=",
+      "dependencies": [
+        "bifunctors",
+        "profunctor"
+      ]
+    },
+    "codec-argonaut": {
+      "type": "registry",
+      "version": "10.0.0",
+      "integrity": "sha256-n80U8KiBk333qfQwDobSZWiyNg9BA3CL/EwFznIdRwI=",
+      "dependencies": [
+        "argonaut-core",
+        "codec",
+        "foreign-object",
+        "ordered-collections",
+        "type-equality",
+        "variant"
       ]
     },
     "colors": {
