@@ -16,6 +16,7 @@ package:
     - halogen
     - halogen-css
     - maybe
+    - leibniz
     - prelude
     - web-socket
     - went

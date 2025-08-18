@@ -19,6 +19,7 @@
             "gojs",
             "halogen",
             "halogen-css",
+            "leibniz",
             "maybe",
             "prelude",
             "web-socket",
@@ -80,6 +81,7 @@
             "js-uri",
             "lazy",
             "lcg",
+            "leibniz",
             "lists",
             "maybe",
             "media-types",
@@ -1366,6 +1368,15 @@
         "partial",
         "prelude",
         "random"
+      ]
+    },
+    "leibniz": {
+      "type": "registry",
+      "version": "5.0.0",
+      "integrity": "sha256-2tdNZoUjAU5cIdDqpx+r80z4spnx0bIRwYzpC3mDE9E=",
+      "dependencies": [
+        "prelude",
+        "unsafe-coerce"
       ]
     },
     "lists": {

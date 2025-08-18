@@ -2,7 +2,7 @@ module Main where
 
 import Prelude
 
-import Component.Parent as Parent
+import Parent.Component as Parent
 import Effect (Effect)
 import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
