@@ -4,12 +4,12 @@ import Prelude
 
 import CSS as CSS
 import Control.Monad.Except (runExcept)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson, parseJson)
-import Data.Argonaut.Decode.Generic (genericDecodeJson)
+import Data.Argonaut.Parser as J
 import Data.Bifunctor (lmap)
-import Data.Either (Either(..))
+import Data.Codec.Argonaut (JsonCodec, decode, object) as CA
+import Data.Codec.Argonaut.Record as CAR
+import Data.Either (Either)
 import Data.Foldable (for_)
-import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
@@ -22,11 +22,11 @@ import Halogen.HTML.CSS as HCSS
 import Halogen.Subscription as HS
 import Optimization.Algorithm as Algorithm
 import Optimization.Button.Component as Button
-import Optimization.Energy.Component (EnergyData(..))
+import Optimization.Energy.Component (EnergyData)
 import Optimization.Problem as Problem
 import Optimization.Renderer.Component as Renderer
 import Optimization.Tabs.Component as Tabs
-import Optimization.Temperature.Component (TemperatureData(..))
+import Optimization.Temperature.Component (TemperatureData)
 import Optimization.TimeSeries.Component as TimeSeries
 import Type.Prelude (Proxy(..))
 import Web.Event.EventTarget as EET
@@ -36,15 +36,16 @@ import Web.Socket.WebSocket as WS
 
 
 -- ───────── payload from backend ──────────────────────────────────────
-newtype Payload = Payload
+type Payload = 
   { solution :: Problem.Problem
   , algorithm :: Algorithm.AlgorithmData 
   }
 
-derive instance genericPayload :: Generic Payload _
-
-instance decodeJsonPayload :: DecodeJson Payload where
-  decodeJson = genericDecodeJson
+payloadCodec :: CA.JsonCodec Payload
+payloadCodec = CA.object "Payload" (CAR.record {
+  "solution": Problem.problemCodec,
+  "algorithm": Algorithm.algorithmDataCodec
+})
 
 
 -- ───────── state / action / output ────────────────────────────────────
@@ -163,9 +164,11 @@ mkSocket = do
   pure (Tuple sock emitter)
   where
     readHelper :: Foreign -> Either String Action
-    readHelper frgn = case (lmap show <<< (decodeJson <=< parseJson)) =<< lmap show (runExcept (readString frgn)) of
-      Right payload -> Right (DataFrame payload)
-      Left err -> Left (show err)
+    readHelper frgn = do
+      txt <- lmap show (runExcept (readString frgn))
+      json <- J.jsonParser txt
+      DataFrame <$> lmap show (CA.decode payloadCodec json)
+
 
 
 handleAction :: forall m q. MonadEffect m => Action -> H.HalogenM State Action (Slots q) Void m Unit
@@ -181,7 +184,7 @@ handleAction = case _ of
     st ← H.get
     for_ st.socket \s -> liftEffect $ WS.close s
 
-  DataFrame (Payload { solution, algorithm }) -> do
+  DataFrame { solution, algorithm } -> do
     H.tell _renderer inds.renderer <<< Renderer.ProblemStep $ solution
     -- TODO: Probably should be another component, like "side panel" or "info dashboard"
     -- case algorithm of

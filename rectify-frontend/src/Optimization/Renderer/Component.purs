@@ -30,19 +30,17 @@ data Action = Initialize | Finalize
 data State = None | GoJS Diagram_ | ThreeJS Scene_
 
 
+
 init :: String -> Problem.Problem -> Effect State
-init divId prob = case prob of
-  Problem.Surface state -> GoJS <$> Renderer.Diagram.initDiagram divId prob
-  Problem.TSP state -> GoJS <$> Renderer.Diagram.initDiagram divId prob
-  Problem.Reservoir _ -> GoJS <$> throw "Not implemented"
-  Problem.Surface3D -> ThreeJS <$> throw "Not implemented"
-  Problem.TSP3D -> ThreeJS <$> throw "Not implemented"
+init divId prob = case Problem.rendererProblem prob of
+  Problem.GoJS prob -> GoJS <$> Renderer.Diagram.initDiagram divId prob
+  Problem.ThreeJS prob -> ThreeJS <$> throw "Not implemented"
 
 update :: State -> Problem.Problem -> Effect Unit
-update state prob = case state of
-  GoJS diagram -> Renderer.Diagram.updateDiagram diagram prob
-  ThreeJS scene -> throw "Not implemented"
-  None -> throw "Not implemented"
+update state prob = case state, Problem.rendererProblem prob of
+  GoJS diagram, Problem.GoJS prob -> Renderer.Diagram.updateDiagram diagram prob
+  ThreeJS scene, Problem.ThreeJS prob -> throw "Not implemented"
+  _, _ -> throw "illegal state failed to be made unrepresentable"
 
 canvasDivId :: String
 canvasDivId = "canvasDiv"

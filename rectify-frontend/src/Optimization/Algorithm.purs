@@ -1,23 +1,65 @@
 module Optimization.Algorithm where
 
-import Data.Argonaut.Decode (class DecodeJson)
-import Data.Argonaut.Decode.Generic (genericDecodeJson)
-import Data.Generic.Rep (class Generic)
+import Prelude
+
+import Data.Codec.Argonaut as CA
+import Data.Codec.Argonaut.Record as CAR
+import Data.Codec.Argonaut.Sum as CAS
+import Data.Either (Either(..))
+import Data.Maybe (Maybe(..))
+import Data.Tuple (Tuple(..))
+
+type SimulatedAnnealingData = {
+  beta :: Number,
+  betaCounter :: Int,
+  fitness :: Number
+}
+
+simulatedAnnealingDataCodec :: CA.JsonCodec SimulatedAnnealingData
+simulatedAnnealingDataCodec = CA.object "SimulatedAnnealingData" (CAR.record {
+  "beta": CA.number,
+  "betaCounter": CA.int,
+  "fitness": CA.number
+})
+
+type GeneticAlgorithmData = {
+  populationSize :: Int,
+  mutationRate :: Number,
+  crossoverRate :: Number,
+  fitness :: Number
+}
+
+geneticAlgorithmDataCodec :: CA.JsonCodec GeneticAlgorithmData
+geneticAlgorithmDataCodec = CA.object "GeneticAlgorithmData" (CAR.record {
+  "populationSize": CA.int,
+  "mutationRate": CA.number,
+  "crossoverRate": CA.number,
+  "fitness": CA.number
+})
 
 data AlgorithmData 
-  = SimulatedAnnealing {
-      beta :: Number,
-      betaCounter :: Int,
-      fitness :: Number
-    }
-  | GeneticAlgorithm {
-      populationSize :: Int,
-      mutationRate :: Number,
-      crossoverRate :: Number,
-      fitness :: Number
-    }
+  = SimulatedAnnealing SimulatedAnnealingData
+  | GeneticAlgorithm GeneticAlgorithmData
 
-derive instance genericAlgorithmData :: Generic AlgorithmData _
+data AlgorithmTags = SimulatedAnnealingTag | GeneticAlgorithmTag
 
-instance decodeJsonAlgorithmData :: DecodeJson AlgorithmData where
-  decodeJson = genericDecodeJson
+algorithmDataCodec :: CA.JsonCodec AlgorithmData
+algorithmDataCodec = CAS.taggedSum "AlgorithmData"
+  (case _ of
+    SimulatedAnnealingTag -> "simulatedAnnealing"
+    GeneticAlgorithmTag -> "geneticAlgorithm"
+  )
+  (case _ of
+    "simulatedAnnealing" -> Just SimulatedAnnealingTag
+    "geneticAlgorithm" -> Just GeneticAlgorithmTag
+    _ -> Nothing
+  )
+  (case _ of
+    SimulatedAnnealingTag -> Right (map SimulatedAnnealing <<< CA.decode simulatedAnnealingDataCodec)
+    GeneticAlgorithmTag -> Right (map GeneticAlgorithm <<< CA.decode geneticAlgorithmDataCodec)
+  )
+  (case _ of
+    SimulatedAnnealing d -> Tuple SimulatedAnnealingTag (Just (CA.encode simulatedAnnealingDataCodec d))
+    GeneticAlgorithm d -> Tuple GeneticAlgorithmTag (Just (CA.encode geneticAlgorithmDataCodec d))
+  )
+  
