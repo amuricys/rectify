@@ -30,7 +30,6 @@ data Action = Initialize | Finalize
 data State = None | GoJS Diagram_ | ThreeJS Scene_
 
 
-
 init :: String -> Problem.Problem -> Effect State
 init divId prob = case Problem.rendererProblem prob of
   Problem.GoJS prob -> GoJS <$> Renderer.Diagram.initDiagram divId prob
@@ -45,11 +44,11 @@ update state prob = case state, Problem.rendererProblem prob of
 canvasDivId :: String
 canvasDivId = "canvasDiv"
 
-data Query a 
-  = ProblemStep Problem.Problem a
-  | ProblemChange Problem.Problem a
+data Query p a 
+  = ProblemStep p a
+  | ProblemChange p a
 
-component ∷ ∀ i m. MonadEffect m => H.Component Query i Void m
+component ∷ ∀ i m p. MonadEffect m => H.Component (Query p) i Void m
 component = H.mkComponent
   { initialState: const None
   , render
@@ -72,7 +71,7 @@ component = H.mkComponent
           CSS.height (CSS.pct 100.0)
       ]
       []
-    handleQuery :: forall a. Query a -> H.HalogenM State Action () Void m (Maybe a)
+    handleQuery :: forall a. Query p a -> H.HalogenM State Action () Void m (Maybe a)
     handleQuery = case _ of
       ProblemStep prob a -> do
         state <- H.get

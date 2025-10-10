@@ -170,7 +170,6 @@ mkSocket = do
       DataFrame <$> lmap show (CA.decode payloadCodec json)
 
 
-
 handleAction :: forall m q. MonadEffect m => Action -> H.HalogenM State Action (Slots q) Void m Unit
 handleAction = case _ of
   Initialize -> do

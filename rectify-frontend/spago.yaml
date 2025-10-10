@@ -4,7 +4,6 @@ package:
     - aff-coroutines
     - affjax
     - affjax-web
-    - argonaut-codecs
     - codec-argonaut
     - argonaut-generic
     - console

@@ -8,7 +8,6 @@
             "aff-coroutines",
             "affjax",
             "affjax-web",
-            "argonaut-codecs",
             "argonaut-generic",
             "codec-argonaut",
             "console",
