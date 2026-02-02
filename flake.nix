@@ -1,209 +1,147 @@
 {
-  description = "A monorepo for Haskell backend + PureScript frontend";
+  description = "Rectify: Dynamical systems and optimization visualizer";
 
   nixConfig.allow-import-from-derivation = true;
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    flake-parts.url = "github:hercules-ci/flake-parts";
-    terranix.url = "github:terranix/terranix";
-    mkSpagoDerivation.url = "github:jeslie0/mkSpagoDerivation";
-    purescript-overlay.url = "github:thomashoneyman/purescript-overlay";
-    purescript-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Lean 4
     lean4-nix.url = "github:lenianiva/lean4-nix";
     lean4-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Infrastructure (optional, for deployment)
+    terranix.url = "github:terranix/terranix";
   };
 
-  outputs = { self, nixpkgs, flake-utils, flake-parts, terranix, mkSpagoDerivation
-    , purescript-overlay, lean4-nix, ... }:
+  outputs = { self, nixpkgs, flake-utils, lean4-nix, terranix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        # ─────────────────────────────────────────────────────────────
         overlays = [
-          mkSpagoDerivation.overlays.default
-          purescript-overlay.overlays.default
           (lean4-nix.readToolchainFile ./rectify-lean/lean-toolchain)
         ];
+
         pkgs = import nixpkgs {
           inherit system overlays;
           config = { allowUnfree = true; };
         };
 
-        # ──────────── ❶   Haskell backend  ───────────────────────────
-        backend =
-          pkgs.haskellPackages.callCabal2nix "rectify-backend" ./rectify-backend
-          { };
+        # ──────────────────────────────────────────────────────────────
+        # Julia environment with AlgebraicDynamics dependencies
+        # ──────────────────────────────────────────────────────────────
+        julia = pkgs.julia-bin;
 
-        # ──────────── ❷   Clash bitstream  ───────────────────────────
-        rectify-clash-base =
-          pkgs.haskellPackages.callCabal2nix "rectify-clash" ./rectify-clash
-          { };
-
-        rectify-clash = pkgs.stdenv.mkDerivation {
-          pname = "rectify-clash";
-          version = "0.1.0";
-          src = ./rectify-clash;
-          nativeBuildInputs = [
-            (pkgs.haskellPackages.ghcWithPackages
-              (p: rectify-clash-base.propagatedBuildInputs))
-          ];
-          installPhase = ''
-            mkdir -p $out
-            echo "🏗  Generating Verilog with Clash"
-            ${rectify-clash-base}/bin/clash \
-                --verilog -isrc Reservoir.Project -fclash-hdldir $out
-          '';
-        };
-
-        # ──────────── ❸   PureScript compile (offline)  ──────────────
-        #
-        # This vendors the contents of spago.lock, so it never hits the
-        # registry.  Resulting JS lives in  $ps-out/output/
-        #
-        frontend = pkgs.mkSpagoDerivation {
-          src = ./rectify-frontend;
-          nativeBuildInputs = [
-            pkgs.esbuild
-            pkgs.purs-backend-es
-            pkgs.purs-unstable
-            pkgs.spago-unstable
-          ];
-          buildPhase = ''
-            spago bundle --bundle-type app \
-                         --platform browser \
-                         --minify \
-                         --outfile dist/app.js
-          '';
-          installPhase = ''
-            mkdir -p $out
-            cp -r dist/* $out/
-          '';
-          buildNodeModulesArgs = {
-            npmRoot = ./rectify-frontend;
-            nodejs = pkgs.nodejs;
-          };
-        };
-
+        # ──────────────────────────────────────────────────────────────
+        # Lean backend (dynamical systems)
+        # ──────────────────────────────────────────────────────────────
         rectify-lean = pkgs.lean.buildLeanPackage {
           name = "Rectify";
-          # roots = ["Rectify"];
           src = ./rectify-lean;
         };
-        #   pkgs.stdenv.mkDerivation {
-        #   pname = "rectify-lean";
-        #   version = "0.1.0";
-        #   src = ./rectify-lean;
 
-        #   buildInputs = with pkgs; [ elan lean4 libwebsockets ];
+        # ──────────────────────────────────────────────────────────────
+        # Svelte frontend build
+        # ──────────────────────────────────────────────────────────────
+        frontend = pkgs.buildNpmPackage {
+          pname = "rectify-frontend";
+          version = "0.1.0";
+          src = ./rectify-frontend;
+          npmDepsHash = ""; # Will need to be filled after first build attempt
 
-        #   nativeBuildInputs = with pkgs; [ pkg-config ];
-
-        #   buildPhase = ''
-        #     # First build the FFI library
-        #     mkdir -p .lake/build/lib
-        #     gcc -c -fPIC -I${pkgs.lean4}/include ffi/websocket.c \
-        #         $(pkg-config --cflags libwebsockets) \
-        #         -o .lake/build/lib/websocket_ffi.o
-        #     ar rcs .lake/build/lib/libwebsocket_ffi.a .lake/build/lib/websocket_ffi.o
-
-        #     # Then build with Lake
-        #     export LEAN_PATH=${pkgs.lean4}/lib/lean
-        #     lake build
-        #   '';
-
-        #   installPhase = ''
-        #     mkdir -p $out/bin
-        #     cp .lake/build/bin/rectify_ws $out/bin/
-
-        #     # Create wrapper with library paths
-        #     wrapProgram $out/bin/rectify_ws \
-        #       --prefix LD_LIBRARY_PATH : ${
-        #         pkgs.lib.makeLibraryPath [ pkgs.libwebsockets ]
-        #       }
-        #   '';
-        # };
-
-        # ──────────── ❺   C shim library  ────────────────────────────
-        libf2wrap = pkgs.stdenv.mkDerivation {
-          pname = "libf2wrap";
-          version = "0.1";
-          src = ./infra/libf2wrap;
-          nativeBuildInputs = [ pkgs.cmake ];
-          buildInputs = [ pkgs.aws-fpga-tools.dev.pci ];
-          installPhase = ''
-            mkdir -p $out/lib
-            cp libf2wrap.so $out/lib/
+          buildPhase = ''
+            npm run build
           '';
-        };
 
-        # ──────────── ❻   Terranix / Terraform config  ───────────────
-        infra = terranix.lib.terranixConfiguration {
-          inherit system;
-          modules = [
-            ./infra/aws-ec2.nix # back-end EC2
-            ./infra/aws-s3-frontend.nix # static site + HTTPS
-          ];
-          extraArgs = {
-            backend = backend;
-            frontend = frontend;
-          };
+          installPhase = ''
+            mkdir -p $out
+            cp -r build/* $out/
+          '';
         };
 
       in {
-
-        # ~~~~~~~~~~~~~ exposed artefacts ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ═══════════════════════════════════════════════════════════════
+        # Packages
+        # ═══════════════════════════════════════════════════════════════
         packages = {
-          backend = backend;
-          frontend = frontend;
-          clash = rectify-clash;
-      #    rectify-lean = rectify-lean.executable;
-          libf2wrap = libf2wrap;
-          infra = infra;
+          # frontend = frontend;  # Uncomment when npmDepsHash is set
+          # rectify-lean = rectify-lean.executable;  # Uncomment when Lean build is working
         };
 
-        defaultPackage = backend;
-
-        # ~~~~~~~~~~~~~ Dev shells ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ═══════════════════════════════════════════════════════════════
+        # Development shell
+        # ═══════════════════════════════════════════════════════════════
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            # PureScript
-            purs
-            spago-unstable
-            purescript-language-server
-            nodejs
-            esbuild
+            # ─────────── Svelte / Frontend ───────────
+            nodejs_22
+            nodePackages.npm
 
-            # Haskell
-            ghc
-            cabal-install
-            haskellPackages.haskell-language-server
-            ghcid
-            zlib
-
-            # FPGA / Clash
-            rectify-clash
-            verilator
-
-            # Lean
+            # ─────────── Lean 4 ───────────
             lean.lean-all
             libwebsockets
             openssl.dev
-      #      rectify-lean.executable
-            
-            # Infra tooling
+            pkg-config
+
+            # ─────────── Julia ───────────
+            julia-bin
+
+            # ─────────── Infrastructure (optional) ───────────
             terraform
             awscli2
           ];
-          CLASH_OPTS = "--verilog -outputdir verilog-out";
+
+          shellHook = ''
+            echo "╔════════════════════════════════════════════════════════════╗"
+            echo "║  rectify dev environment                                   ║"
+            echo "╠════════════════════════════════════════════════════════════╣"
+            echo "║  Frontend (Svelte):  cd rectify-frontend && npm run dev    ║"
+            echo "║  Backend (Lean):     cd rectify-lean && lake build && lake exe rectify  ║"
+            echo "║  Backend (Julia):    cd rectify-julia && julia --project=. run.jl       ║"
+            echo "╚════════════════════════════════════════════════════════════╝"
+          '';
+
+          # For Lean FFI compilation
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.libwebsockets
+            pkgs.openssl
+          ];
         };
 
-        devShells.deploy = pkgs.mkShell {
-          inputsFrom = [ infra ];
-          packages = [ pkgs.terraform pkgs.awscli2 ];
+        # ═══════════════════════════════════════════════════════════════
+        # Specialized shells
+        # ═══════════════════════════════════════════════════════════════
+
+        # Frontend-only development
+        devShells.frontend = pkgs.mkShell {
+          packages = with pkgs; [
+            nodejs_22
+            nodePackages.npm
+          ];
+        };
+
+        # Lean-only development
+        devShells.lean = pkgs.mkShell {
+          packages = with pkgs; [
+            lean.lean-all
+            libwebsockets
+            openssl.dev
+            pkg-config
+          ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.libwebsockets
+            pkgs.openssl
+          ];
+        };
+
+        # Julia-only development
+        devShells.julia = pkgs.mkShell {
+          packages = with pkgs; [
+            julia-bin
+          ];
           shellHook = ''
-            touch config.tf.json
-            cp ${infra} config.tf.json
+            echo "Julia environment ready"
+            echo "Run: cd rectify-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'"
           '';
         };
       });

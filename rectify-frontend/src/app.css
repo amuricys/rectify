@@ -1,0 +1,49 @@
+:root {
+	--bg-dark: #0a0a0f;
+	--bg-panel: #12121a;
+	--border: #2a2a3a;
+	--text: #e0e0e8;
+	--text-dim: #808090;
+	--accent: #6a8caf;
+	--accent-glow: #7a9cbf;
+}
+
+* {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html, body {
+	height: 100%;
+	background: var(--bg-dark);
+	color: var(--text);
+	font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+	font-size: 14px;
+}
+
+button {
+	background: var(--bg-panel);
+	border: 1px solid var(--border);
+	color: var(--text);
+	padding: 0.5rem 1rem;
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 0.875rem;
+	transition: all 0.15s ease;
+}
+
+button:hover {
+	border-color: var(--accent);
+	color: var(--accent-glow);
+}
+
+button:active {
+	background: var(--border);
+}
+
+button.active {
+	border-color: var(--accent);
+	color: var(--accent-glow);
+	box-shadow: 0 0 8px rgba(106, 140, 175, 0.3);
+}

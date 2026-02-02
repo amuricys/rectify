@@ -1,0 +1,10 @@
+[deps]
+AlgebraicDynamics = "5fd6ff03-a254-427e-8840-ba658f502e32"
+Catlab = "134e5e36-593f-5add-ad60-77f754baafbe"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+StructTypes = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
+
+[compat]
+julia = "1.9"
