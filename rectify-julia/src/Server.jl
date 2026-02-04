@@ -6,309 +6,448 @@ using JSON3
 using StructTypes
 
 using AlgebraicDynamics.DWDDynam
-using Catlab.WiringDiagrams
-using DifferentialEquations
 
+# Import sibling modules
 include("Systems.jl")
+include("World.jl")
+include("Composition.jl")
+include("Simulation.jl")
+
 using .Systems
+using .World
+using .Composition
+using .Simulation
 
 export start_server
 
-# ============================================================================
-# Protocol types
-# ============================================================================
+# =============================================================================
+# Server State
+# =============================================================================
 
-abstract type Message end
-
-struct AddSystem <: Message
-    id::String
-    kind::String
-    params::Dict{String, Float64}
+mutable struct ServerState
+    world::WorldState
+    composed::Union{Nothing, ComposedSystemInfo}
+    clients::Vector{HTTP.WebSockets.WebSocket}
+    lock::ReentrantLock
 end
 
-struct RemoveSystem <: Message
-    id::String
-end
-
-struct Wire <: Message
-    from_system::String
-    from_port::Int
-    to_system::String
-    to_port::Int
-end
-
-struct Unwire <: Message
-    from_system::String
-    from_port::Int
-    to_system::String
-    to_port::Int
-end
-
-struct SetState <: Message
-    system_id::String
-    state::Vector{Float64}
-end
-
-struct Control <: Message
-    action::String  # "play", "pause", "step", "reset"
-end
-
-# JSON parsing
-StructTypes.StructType(::Type{AddSystem}) = StructTypes.Struct()
-StructTypes.StructType(::Type{RemoveSystem}) = StructTypes.Struct()
-StructTypes.StructType(::Type{Wire}) = StructTypes.Struct()
-StructTypes.StructType(::Type{Control}) = StructTypes.Struct()
-
-# ============================================================================
-# World state
-# ============================================================================
-
-mutable struct SystemInstance
-    id::String
-    kind::String
-    machine::ContinuousMachine{Float64}
-    state::Vector{Float64}
-    params::Dict{String, Float64}
-end
-
-mutable struct WorldState
-    systems::Dict{String, SystemInstance}
-    wires::Vector{Tuple{String, Int, String, Int}}  # (from_id, from_port, to_id, to_port)
-    running::Bool
-    t::Float64
-    dt::Float64
-end
-
-function WorldState()
-    WorldState(
-        Dict{String, SystemInstance}(),
-        Vector{Tuple{String, Int, String, Int}}(),
-        false,
-        0.0,
-        0.01
+function ServerState()
+    ServerState(
+        WorldState(),
+        nothing,
+        HTTP.WebSockets.WebSocket[],
+        ReentrantLock()
     )
 end
 
-# ============================================================================
-# System factory
-# ============================================================================
+# =============================================================================
+# Recomposition
+# =============================================================================
 
-function create_system(kind::String, params::Dict{String, Float64})
-    if kind == "lorenz"
-        σ = get(params, "sigma", 10.0)
-        ρ = get(params, "rho", 28.0)
-        β = get(params, "beta", 8/3)
-        machine = lorenz_machine(; σ=σ, ρ=ρ, β=β)
-        initial_state = [1.0, 1.0, 1.0]
-        return machine, initial_state
-    elseif kind == "harmonic"
-        m = get(params, "m", 1.0)
-        k = get(params, "k", 1.0)
-        damping = get(params, "damping", 0.0)
-        machine = harmonic_machine(; m=m, k=k, damping=damping)
-        initial_state = [1.0, 0.0]
-        return machine, initial_state
-    elseif kind == "vanderpol"
-        μ = get(params, "mu", 1.0)
-        machine = vanderpol_machine(; μ=μ)
-        initial_state = [1.0, 0.0]
-        return machine, initial_state
-    elseif kind == "duffing"
-        δ = get(params, "delta", 0.3)
-        α = get(params, "alpha", -1.0)
-        β = get(params, "beta", 1.0)
-        γ = get(params, "gamma", 0.5)
-        ω = get(params, "omega", 1.2)
-        machine = duffing_machine(; δ=δ, α=α, β=β, γ=γ, ω=ω)
-        initial_state = [1.0, 0.0]
-        return machine, initial_state
-    else
-        error("Unknown system kind: $kind")
+"""
+    recompose!(state::ServerState)
+
+Rebuild the composed system after wiring changes.
+
+This is called when:
+- A system is added or removed
+- A wire is added or removed
+- System parameters change (may require recreating machine)
+
+The recomposition uses oapply on the current wiring diagram.
+"""
+function recompose!(state::ServerState)
+    world = state.world
+
+    if isempty(world.systems)
+        state.composed = nothing
+        world.needs_recomposition = false
+        return
+    end
+
+    println("Recomposing $(length(world.systems)) systems with $(length(world.wires)) wires...")
+
+    try
+        state.composed = compose_systems(world.systems, world.wires)
+        world.needs_recomposition = false
+        println("Recomposition complete. Total states: $(state.composed.total_states)")
+    catch e
+        println("Recomposition failed: $e")
+        # Fall back to independent stepping
+        state.composed = nothing
+        world.needs_recomposition = false
     end
 end
 
-# ============================================================================
-# Simulation step
-# ============================================================================
+# =============================================================================
+# Message Handling
+# =============================================================================
 
-function step_world!(world::WorldState)
-    # For now, step each system independently
-    # TODO: Use AlgebraicDynamics composition for wired systems
+function handle_message!(state::ServerState, msg::Dict{String, Any})
+    msg_type = get(msg, "type", "")
+    world = state.world
 
-    for (id, sys) in world.systems
-        # Gather inputs from wires
-        inputs = zeros(ninputs(sys.machine))
+    if msg_type == "AddSystem"
+        return handle_add_system!(state, msg)
 
-        for (from_id, from_port, to_id, to_port) in world.wires
-            if to_id == id && to_port <= length(inputs)
-                from_sys = get(world.systems, from_id, nothing)
-                if from_sys !== nothing
-                    # Get output from source system
-                    output = readout(from_sys.machine, from_sys.state, nothing, world.t)
-                    if from_port <= length(output)
-                        inputs[to_port] = output[from_port]
-                    end
+    elseif msg_type == "RemoveSystem"
+        return handle_remove_system!(state, msg)
+
+    elseif msg_type == "Wire"
+        return handle_wire!(state, msg)
+
+    elseif msg_type == "Unwire"
+        return handle_unwire!(state, msg)
+
+    elseif msg_type == "SetParams"
+        return handle_set_params!(state, msg)
+
+    elseif msg_type == "SetState"
+        return handle_set_state!(state, msg)
+
+    elseif msg_type == "Control"
+        return handle_control!(state, msg)
+
+    elseif msg_type == "GetTemplates"
+        return Dict("type" => "Templates", "templates" => list_templates())
+
+    elseif msg_type == "GetWorldState"
+        return serialize_world(world)
+
+    else
+        return Dict("type" => "Error", "code" => "UNKNOWN_MESSAGE", "message" => "Unknown message type: $msg_type")
+    end
+end
+
+function handle_add_system!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+
+    instance_id = get(msg, "instanceId", "")
+    template_id = get(msg, "templateId", "")
+    params_raw = get(msg, "parameters", Dict())
+    position_raw = get(msg, "position", Dict("x" => 0.0, "y" => 0.0))
+    initial_state_raw = get(msg, "initialState", nothing)
+
+    if isempty(instance_id) || isempty(template_id)
+        return Dict("type" => "Error", "code" => "INVALID_PARAMS", "message" => "instanceId and templateId are required")
+    end
+
+    # Convert parameters
+    params = Dict{String, Float64}(String(k) => Float64(v) for (k, v) in params_raw)
+    position = (Float64(get(position_raw, "x", 0.0)), Float64(get(position_raw, "y", 0.0)))
+
+    # Create the machine
+    try
+        machine, default_initial = Systems.create_system(template_id, params)
+
+        # Use provided initial state or default
+        initial_state = if initial_state_raw !== nothing
+            Float64.(initial_state_raw)
+        else
+            default_initial
+        end
+
+        add_system!(world, instance_id, template_id, machine, initial_state, params; position=position)
+
+        println("Added system: $instance_id ($template_id)")
+
+        # Trigger recomposition
+        recompose!(state)
+
+        return Dict("type" => "Ack", "success" => true, "action" => "AddSystem", "instanceId" => instance_id)
+    catch e
+        return Dict("type" => "Error", "code" => "ADD_FAILED", "message" => string(e))
+    end
+end
+
+function handle_remove_system!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+    instance_id = get(msg, "instanceId", "")
+
+    try
+        remove_system!(world, instance_id)
+        println("Removed system: $instance_id")
+
+        # Trigger recomposition
+        recompose!(state)
+
+        return Dict("type" => "Ack", "success" => true, "action" => "RemoveSystem", "instanceId" => instance_id)
+    catch e
+        return Dict("type" => "Error", "code" => "REMOVE_FAILED", "message" => string(e))
+    end
+end
+
+function handle_wire!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+
+    wire_id = get(msg, "wireId", "")
+    from_system = get(msg, "fromSystem", "")
+    from_port = get(msg, "fromPort", 0)
+    to_system = get(msg, "toSystem", "")
+    to_port = get(msg, "toPort", 0)
+
+    try
+        add_wire!(world, wire_id, from_system, from_port, to_system, to_port)
+        println("Added wire: $wire_id ($from_system:$from_port → $to_system:$to_port)")
+
+        # Trigger recomposition
+        recompose!(state)
+
+        return Dict("type" => "Ack", "success" => true, "action" => "Wire", "wireId" => wire_id)
+    catch e
+        return Dict("type" => "Error", "code" => "WIRE_FAILED", "message" => string(e))
+    end
+end
+
+function handle_unwire!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+    wire_id = get(msg, "wireId", "")
+
+    try
+        remove_wire!(world, wire_id)
+        println("Removed wire: $wire_id")
+
+        # Trigger recomposition
+        recompose!(state)
+
+        return Dict("type" => "Ack", "success" => true, "action" => "Unwire", "wireId" => wire_id)
+    catch e
+        return Dict("type" => "Error", "code" => "UNWIRE_FAILED", "message" => string(e))
+    end
+end
+
+function handle_set_params!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+
+    instance_id = get(msg, "instanceId", "")
+    params_raw = get(msg, "parameters", Dict())
+    params = Dict{String, Float64}(String(k) => Float64(v) for (k, v) in params_raw)
+
+    try
+        # For now, just update the stored params
+        # Full implementation would recreate the machine with new params
+        set_system_params!(world, instance_id, params)
+
+        # TODO: Recreate machine if dynamics depend on params
+        # This requires access to the system registry
+
+        return Dict("type" => "Ack", "success" => true, "action" => "SetParams", "instanceId" => instance_id)
+    catch e
+        return Dict("type" => "Error", "code" => "SET_PARAMS_FAILED", "message" => string(e))
+    end
+end
+
+function handle_set_state!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+
+    instance_id = get(msg, "instanceId", "")
+    new_state = get(msg, "state", Float64[])
+
+    try
+        set_system_state!(world, instance_id, Float64.(new_state))
+        return Dict("type" => "Ack", "success" => true, "action" => "SetState", "instanceId" => instance_id)
+    catch e
+        return Dict("type" => "Error", "code" => "SET_STATE_FAILED", "message" => string(e))
+    end
+end
+
+function handle_control!(state::ServerState, msg::Dict{String, Any})
+    world = state.world
+    action = get(msg, "action", "")
+
+    if action == "play"
+        world.running = true
+        println("Simulation started")
+
+    elseif action == "pause"
+        world.running = false
+        println("Simulation paused")
+
+    elseif action == "step"
+        # Single step
+        if state.composed !== nothing
+            step_world!(world, state.composed, world.dt)
+        else
+            step_world_independent!(world, world.dt)
+        end
+
+    elseif action == "reset"
+        world.time = 0.0
+        for sys in values(world.systems)
+            _, initial_state = Systems.create_system(sys.template_id, sys.parameters)
+            sys.state .= initial_state
+        end
+        println("Simulation reset")
+
+    elseif action == "setSpeed"
+        speed = get(msg, "speed", 1.0)
+        world.speed = Float64(speed)
+        println("Speed set to $(world.speed)")
+
+    elseif action == "setDt"
+        dt = get(msg, "dt", 0.001)
+        world.dt = Float64(dt)
+        println("dt set to $(world.dt)")
+    end
+
+    return Dict("type" => "Ack", "success" => true, "action" => action)
+end
+
+# =============================================================================
+# Broadcasting
+# =============================================================================
+
+function broadcast_to_clients(state::ServerState, message::Dict)
+    try
+        json = JSON3.write(message)
+        lock(state.lock) do
+            println("Broadcasting $(message["type"]) to $(length(state.clients)) clients")
+            for ws in state.clients
+                try
+                    send(ws, json)
+                catch e
+                    println("Error sending to client: $e")
                 end
             end
         end
-
-        # Simple Euler step (for demonstration; could use DifferentialEquations.jl)
-        du = eval_dynamics(sys.machine, sys.state, inputs, nothing, world.t)
-        sys.state .+= world.dt .* du
+    catch e
+        println("Error serializing message: $e")
+        println(stacktrace(catch_backtrace()))
     end
-
-    world.t += world.dt
 end
 
-# ============================================================================
-# Message handling
-# ============================================================================
+function broadcast_world_state(state::ServerState)
+    broadcast_to_clients(state, serialize_world(state.world))
+end
 
-function handle_message!(world::WorldState, msg::Dict)
-    msg_type = get(msg, "type", "")
+function broadcast_state_update(state::ServerState)
+    broadcast_to_clients(state, serialize_state_update(state.world))
+end
 
-    if msg_type == "add_system"
-        id = msg["id"]
-        kind = msg["kind"]
-        params = Dict{String, Float64}(
-            String(k) => Float64(v) for (k, v) in get(msg, "params", Dict())
-        )
-        machine, initial_state = create_system(kind, params)
-        world.systems[id] = SystemInstance(id, kind, machine, initial_state, params)
-        println("Added system: $id ($kind)")
-        return Dict("type" => "system_added", "id" => id)
+# =============================================================================
+# Simulation Loop
+# =============================================================================
 
-    elseif msg_type == "remove_system"
-        id = msg["id"]
-        delete!(world.systems, id)
-        # Remove associated wires
-        filter!(w -> w[1] != id && w[3] != id, world.wires)
-        println("Removed system: $id")
-        return Dict("type" => "system_removed", "id" => id)
+function simulation_loop(state::ServerState)
+    target_frame_time = 1/60  # 60 Hz broadcast rate
 
-    elseif msg_type == "wire"
-        from_id = msg["from_system"]
-        from_port = msg["from_port"]
-        to_id = msg["to_system"]
-        to_port = msg["to_port"]
-        push!(world.wires, (from_id, from_port, to_id, to_port))
-        println("Wired: $from_id:$from_port → $to_id:$to_port")
-        return Dict("type" => "wired", "from" => from_id, "to" => to_id)
+    while true
+        frame_start = time()
 
-    elseif msg_type == "unwire"
-        from_id = msg["from_system"]
-        from_port = msg["from_port"]
-        to_id = msg["to_system"]
-        to_port = msg["to_port"]
-        filter!(w -> w != (from_id, from_port, to_id, to_port), world.wires)
-        return Dict("type" => "unwired")
-
-    elseif msg_type == "control"
-        action = msg["action"]
-        if action == "play"
-            world.running = true
-        elseif action == "pause"
-            world.running = false
-        elseif action == "step"
-            step_world!(world)
-        elseif action == "reset"
-            world.t = 0.0
-            for (id, sys) in world.systems
-                _, initial = create_system(sys.kind, sys.params)
-                sys.state .= initial
+        if state.world.running
+            # Check if recomposition is needed
+            if state.world.needs_recomposition
+                recompose!(state)
             end
+
+            # Calculate how many simulation steps per frame
+            sim_dt = state.world.dt
+            frame_dt = target_frame_time * state.world.speed
+            steps_per_frame = max(1, round(Int, frame_dt / sim_dt))
+
+            # Run simulation steps
+            for _ in 1:steps_per_frame
+                if state.composed !== nothing
+                    step_world!(state.world, state.composed, sim_dt)
+                else
+                    step_world_independent!(state.world, sim_dt)
+                end
+            end
+
+            # Record history for visualization trails
+            record_history!(state.world)
+
+            # Broadcast state update
+            broadcast_state_update(state)
         end
-        return Dict("type" => "control_ack", "action" => action)
 
-    elseif msg_type == "get_state"
-        return build_state_message(world)
-
-    else
-        return Dict("type" => "error", "message" => "Unknown message type: $msg_type")
+        # Sleep to maintain frame rate
+        elapsed = time() - frame_start
+        sleep_time = target_frame_time - elapsed
+        if sleep_time > 0
+            sleep(sleep_time)
+        end
     end
 end
 
-function build_state_message(world::WorldState)
-    systems_state = Dict{String, Any}()
-
-    for (id, sys) in world.systems
-        output = readout(sys.machine, sys.state, nothing, world.t)
-        systems_state[id] = Dict(
-            "kind" => sys.kind,
-            "state" => sys.state,
-            "output" => output,
-            "ninputs" => ninputs(sys.machine),
-            "noutputs" => noutputs(sys.machine)
-        )
-    end
-
-    Dict(
-        "type" => "state",
-        "t" => world.t,
-        "running" => world.running,
-        "systems" => systems_state,
-        "wires" => [
-            Dict("from_system" => w[1], "from_port" => w[2],
-                 "to_system" => w[3], "to_port" => w[4])
-            for w in world.wires
-        ]
-    )
-end
-
-# ============================================================================
-# WebSocket server
-# ============================================================================
+# =============================================================================
+# WebSocket Server
+# =============================================================================
 
 function start_server(; port=8082)
-    world = WorldState()
+    state = ServerState()
 
-    # Add a default Lorenz system for testing
-    machine, initial_state = create_system("lorenz", Dict{String, Float64}())
-    world.systems["lorenz1"] = SystemInstance("lorenz1", "lorenz", machine, initial_state, Dict{String, Float64}())
+    println("===========================================")
+    println("  Rectify Julia Backend")
+    println("  AlgebraicDynamics + Catlab Composition")
+    println("===========================================")
+    println()
+    println("Available system templates:")
+    for template in list_templates()
+        println("  - $(template["id"]): $(template["name"]) ($(template["nstates"]) states, $(template["ninputs"]) in, $(template["noutputs"]) out)")
+    end
+    println()
+    println("Starting WebSocket server on port $port...")
 
-    println("Starting AlgebraicDynamics server on port $port...")
+    # Start simulation loop in background
+    sim_task = @async simulation_loop(state)
 
+    # Start WebSocket server
     server = WebSockets.listen!("0.0.0.0", port) do ws
         println("Client connected")
 
-        # Send initial state
-        send(ws, JSON3.write(build_state_message(world)))
+        # Add to client list
+        lock(state.lock) do
+            push!(state.clients, ws)
+        end
 
-        # Simulation loop in background task
-        sim_task = @async begin
-            while isopen(ws)
-                if world.running
-                    step_world!(world)
-                    try
-                        send(ws, JSON3.write(build_state_message(world)))
-                    catch e
-                        break
-                    end
-                end
-                sleep(0.016)  # ~60fps
-            end
+        # Send initial state
+        try
+            # Send available templates
+            send(ws, JSON3.write(Dict("type" => "Templates", "templates" => list_templates())))
+
+            # Send current world state
+            send(ws, JSON3.write(serialize_world(state.world)))
+        catch e
+            println("Error sending initial state: $e")
         end
 
         # Message handling loop
         try
-            for msg in ws
-                parsed = JSON3.read(msg, Dict{String, Any})
-                response = handle_message!(world, parsed)
-                send(ws, JSON3.write(response))
+            for msg_str in ws
+                try
+                    msg = JSON3.read(msg_str, Dict{String, Any})
+                    response = handle_message!(state, msg)
 
-                # Also send full state after any mutation
-                send(ws, JSON3.write(build_state_message(world)))
+                    # Send response
+                    send(ws, JSON3.write(response))
+
+                    # If it was a mutation, broadcast new world state
+                    msg_type = get(msg, "type", "")
+                    if msg_type in ["AddSystem", "RemoveSystem", "Wire", "Unwire", "SetState", "SetParams", "Control"]
+                        broadcast_world_state(state)
+                    end
+                catch e
+                    println("Error handling message: $e")
+                    send(ws, JSON3.write(Dict("type" => "Error", "message" => string(e))))
+                end
             end
         catch e
             if !(e isa HTTP.WebSockets.WebSocketError)
-                println("Error: $e")
+                println("WebSocket error: $e")
             end
+        end
+
+        # Remove from client list
+        lock(state.lock) do
+            filter!(c -> c !== ws, state.clients)
         end
 
         println("Client disconnected")
     end
 
     println("Server running. Press Ctrl+C to stop.")
+    println()
 
     try
         wait(server)

@@ -1,48 +1,77 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import Renderer from '$lib/components/Renderer.svelte';
-	import LorenzRenderer from '$lib/components/LorenzRenderer.svelte';
+	import TSPRenderer from '$lib/components/TSPRenderer.svelte';
+	import OptimizationControls from '$lib/components/OptimizationControls.svelte';
 	import AlgebraicRenderer from '$lib/components/AlgebraicRenderer.svelte';
-	import Controls from '$lib/components/Controls.svelte';
 	import AlgebraicControls from '$lib/components/AlgebraicControls.svelte';
+	import { optimization } from '$lib/stores/optimization.svelte';
+	import { algebraic } from '$lib/stores/algebraic.svelte';
 
-	type Backend = 'lean' | 'julia';
-	let backend = $state<Backend>('julia');
+	type Tab = 'optimization' | 'dynamics';
+	let activeTab = $state<Tab>('dynamics');
+
+	// Auto-connect to the appropriate backend when switching tabs
+	$effect(() => {
+		if (activeTab === 'optimization') {
+			if (optimization.status === 'disconnected') {
+				optimization.connect();
+			}
+		} else if (activeTab === 'dynamics') {
+			if (algebraic.status === 'disconnected') {
+				algebraic.connect();
+			}
+		}
+	});
+
+	onMount(() => {
+		// Connect to dynamics by default
+		algebraic.connect();
+
+		return () => {
+			optimization.disconnect();
+			algebraic.disconnect();
+		};
+	});
 </script>
 
 <div class="app">
 	<header>
 		<h1>rectify</h1>
-		<span class="subtitle">dynamical systems visualizer</span>
-		<div class="backend-switch">
-			<button class:active={backend === 'lean'} onclick={() => backend = 'lean'}>
-				Lean
+		<nav class="tabs">
+			<button class:active={activeTab === 'dynamics'} onclick={() => (activeTab = 'dynamics')}>
+				Open Systems
 			</button>
-			<button class:active={backend === 'julia'} onclick={() => backend = 'julia'}>
-				Julia
+			<button class:active={activeTab === 'optimization'} onclick={() => (activeTab = 'optimization')}>
+				Optimization
 			</button>
-		</div>
+		</nav>
 	</header>
 
 	<main>
-		<aside>
-			{#if backend === 'lean'}
-				<Controls />
-			{:else}
+		{#if activeTab === 'optimization'}
+			<aside>
+				<OptimizationControls />
+			</aside>
+			<section class="viewport">
+				<Renderer>
+					{#snippet children({ width, height })}
+						<TSPRenderer {width} {height} />
+					{/snippet}
+				</Renderer>
+			</section>
+		{:else}
+			<aside>
 				<AlgebraicControls />
-			{/if}
-		</aside>
-
-		<section class="viewport">
-			<Renderer>
-				{#snippet children({ width, height })}
-					{#if backend === 'lean'}
-						<LorenzRenderer {width} {height} />
-					{:else}
+			</aside>
+			<section class="viewport">
+				<Renderer>
+					{#snippet children({ width, height })}
 						<AlgebraicRenderer {width} {height} />
-					{/if}
-				{/snippet}
-			</Renderer>
-		</section>
+					{/snippet}
+				</Renderer>
+			</section>
+		{/if}
 	</main>
 </div>
 
@@ -51,38 +80,51 @@
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
+		background: var(--bg);
 	}
 
 	header {
 		display: flex;
-		align-items: baseline;
-		gap: 1rem;
-		padding: 1rem;
+		align-items: center;
+		gap: 2rem;
+		padding: 0.75rem 1rem;
 		border-bottom: 1px solid var(--border);
+		background: var(--bg-panel);
 	}
 
-	.backend-switch {
-		margin-left: auto;
+	h1 {
+		font-size: 1.1rem;
+		font-weight: 400;
+		letter-spacing: 0.15em;
+		color: var(--accent-glow);
+		margin: 0;
+	}
+
+	.tabs {
 		display: flex;
 		gap: 0.25rem;
 	}
 
-	.backend-switch button {
-		padding: 0.25rem 0.75rem;
-		font-size: 0.75rem;
-	}
-
-	h1 {
-		font-size: 1.25rem;
-		font-weight: 400;
-		letter-spacing: 0.15em;
-		color: var(--accent-glow);
-	}
-
-	.subtitle {
-		font-size: 0.75rem;
+	.tabs button {
+		background: transparent;
+		border: 1px solid transparent;
 		color: var(--text-dim);
+		padding: 0.4rem 0.8rem;
+		font-family: inherit;
+		font-size: 0.8rem;
+		cursor: pointer;
+		transition: all 0.15s;
 		letter-spacing: 0.05em;
+	}
+
+	.tabs button:hover {
+		color: var(--text);
+	}
+
+	.tabs button.active {
+		color: var(--accent);
+		border-color: var(--border);
+		background: var(--bg-dark);
 	}
 
 	main {
@@ -97,6 +139,7 @@
 
 	.viewport {
 		flex: 1;
-		padding: 1rem;
+		padding: 0;
+		position: relative;
 	}
 </style>

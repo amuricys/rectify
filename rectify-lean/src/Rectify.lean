@@ -1,156 +1,167 @@
 -- src/Rectify.lean
+-- Optimization server
+
 import Lean
-import Rectify.Dynamics
+import Rectify.Optimization
+import Rectify.Optimization.SA
+import Rectify.Optimization.TSP
 import Rectify.WebSockets
 import Lean.Data.Json
 
 namespace Rectify
 
 open Lean
+open Rectify.Optimization
+open Rectify.Optimization.SA
+open Rectify.Optimization.TSP
 
-def π : Float := 3.14159265358979323846
+-- ============================================================================
+-- Server state
+-- ============================================================================
 
-inductive DynamicalSystem where
-  | harmonicOscillator
-  | lorenzSystem
-  | duffingOscillator
-  | vanDerPolOscillator
-  deriving instance Repr, DecidableEq for DynamicalSystem
-
--- State management
-inductive ServerState where
+inductive RunState where
   | paused
   | running
   | stepping
-  | changingSystem (system : DynamicalSystem)
-  deriving instance Repr, DecidableEq for ServerState
+  deriving Repr, DecidableEq
 
-structure RunnerState where
-  currentSystem : DynamicalSystem
-  harmonicOscillator : HarmonicOscillatorState
-  lorenzSystem : LorenzState
-  duffingOscillator : DuffingState
-  vanDerPolOscillator : VanDerPolState
+/-- Which problem × algorithm combination is active -/
+inductive ActiveRunner where
+  | tspSA
+  -- | surfaceSA  -- TODO
+  -- | tspGA      -- TODO
+  deriving Repr, DecidableEq
+
+structure ServerState where
+  runState : RunState
+  activeRunner : ActiveRunner
+  /-- RNG state threaded through steps -/
+  rng : StdGen
+  /-- TSP + SA state -/
+  tspSA : SA.State Tour
   deriving Repr
 
-structure RunnerParams where
-  harmonicOscillator : HarmonicOscillatorParams
-  lorenzSystem : LorenzParams
-  duffingOscillator : DuffingParams
-  vanDerPolOscillator : VanDerPolParams
-  deriving Repr
+-- ============================================================================
+-- Initialization
+-- ============================================================================
 
-def defaultParams : RunnerParams :=
-  { harmonicOscillator := { m := 1.0, k := 1.0 },
-    lorenzSystem := { σ := 10.0, ρ := 28.0, β := 8.0 / 3.0 },
-    duffingOscillator := { δ := 1.0, α := 1.0, β := 1.0, γ := 1.0, ω := 1.0 },
-    vanDerPolOscillator := { μ := 1.0 } }
+def initServerState (seed : Nat := 42) : ServerState :=
+  let rng := mkStdGen seed
+  -- Initialize TSP+SA
+  let (tspState, rng') := (SA.init TSP.saAdapter TSP.saParams).run rng
+  {
+    runState := .paused
+    activeRunner := .tspSA
+    rng := rng'
+    tspSA := tspState
+  }
 
-def initialRunnerState : RunnerState :=
-  { currentSystem := .harmonicOscillator,
-    harmonicOscillator := { x := 2.0, p := 0.0 },
-    lorenzSystem := { x := 1.0, y := 1.0, z := 1.0 },
-    duffingOscillator := { x := 1.0, v := 0.0 },
-    vanDerPolOscillator := { x := 1.0, y := 0.0 } }
+-- ============================================================================
+-- Stepping
+-- ============================================================================
 
--- JSON encoding for trajectories
-structure TrajectoryPoint where
-  x : Float
-  y : Float
-  deriving Repr, ToJson
+def stepServer (state : ServerState) : ServerState :=
+  match state.activeRunner with
+  | .tspSA =>
+    let (newTspState, newRng) := (SA.step TSP.saAdapter TSP.saParams state.tspSA).run state.rng
+    { state with tspSA := newTspState, rng := newRng }
 
+-- ============================================================================
+-- JSON output
+-- ============================================================================
+
+def serverStateToJson (state : ServerState) : String :=
+  match state.activeRunner with
+  | .tspSA => toString (toJson state.tspSA)
+
+-- ============================================================================
 -- Message handling
-def handleMessage (state : IO.Ref ServerState) (msg : String) : IO Unit := do
-  let s ← state.get
+-- ============================================================================
+
+def handleMessage (stateRef : IO.Ref ServerState) (msg : String) : IO Unit := do
+  let state ← stateRef.get
   match msg.trim with
-  | "Unpause" =>
-    if s == .paused then
-      state.set .running
-      IO.println "Unpausing"
+  | "Play" | "Unpause" =>
+    if state.runState == .paused then
+      stateRef.modify fun s => { s with runState := .running }
+      IO.println "Running"
   | "Pause" =>
-    if s == .running then
-      state.set .paused
-      IO.println "Pausing"
+    if state.runState == .running then
+      stateRef.modify fun s => { s with runState := .paused }
+      IO.println "Paused"
   | "Step" =>
-    if s == .paused then
-      state.set .stepping
+    if state.runState == .paused then
+      stateRef.modify fun s => { s with runState := .stepping }
       IO.println "Stepping"
-  | "HarmonicOscillator" =>
-    state.set (.changingSystem .harmonicOscillator)
-    IO.println "Switching to Harmonic Oscillator"
-  | "LorenzSystem" =>
-    state.set (.changingSystem .lorenzSystem)
-    IO.println "Switching to Lorenz System"
-  | "DuffingOscillator" =>
-    state.set (.changingSystem .duffingOscillator)
-    IO.println "Switching to Duffing Oscillator"
-  | "VanDerPolOscillator" =>
-    state.set (.changingSystem .vanDerPolOscillator)
-    IO.println "Switching to Van Der Pol Oscillator"
-  | _ => IO.println s!"Unknown message: {msg}"
+  | "TSP_SA" =>
+    stateRef.modify fun s => { s with activeRunner := .tspSA }
+    IO.println "Switched to TSP + Simulated Annealing"
+  | cmd =>
+    if cmd.startsWith "Reset" then
+      let seedStr := cmd.drop 6 |>.trim
+      let seed := seedStr.toNat?.getD 42
+      let newState := initServerState seed
+      stateRef.set newState
+      WebSocket.broadcast (serverStateToJson newState)
+      WebSocket.service 1
+      IO.println s!"Reset with seed {seed}"
+    else
+      IO.println s!"Unknown message: {msg}"
 
-def stepRunner (params : RunnerParams) (runnerState : RunnerState) : RunnerState :=
-  match runnerState.currentSystem with
-  | .harmonicOscillator => { runnerState with harmonicOscillator := harmonicOscillatorSteps params.harmonicOscillator runnerState.harmonicOscillator 0.0 0.0 100 }
-  | .lorenzSystem => { runnerState with lorenzSystem := lorenzSteps params.lorenzSystem runnerState.lorenzSystem 0.0 0.0 100 }
-  | .duffingOscillator => { runnerState with duffingOscillator := duffingSteps params.duffingOscillator runnerState.duffingOscillator 0.0 0.0 100 }
-  | .vanDerPolOscillator => { runnerState with vanDerPolOscillator := vanDerPolSteps params.vanDerPolOscillator runnerState.vanDerPolOscillator 0.0 0.0 100 }
+-- ============================================================================
+-- Runner loop
+-- ============================================================================
 
-def runnerStateToJson (runnerState : RunnerState) : String :=
-  match runnerState.currentSystem with
-  | .harmonicOscillator => toString (toJson runnerState.harmonicOscillator)
-  | .lorenzSystem => toString (toJson runnerState.lorenzSystem)
-  | .duffingOscillator => toString (toJson runnerState.duffingOscillator)
-  | .vanDerPolOscillator => toString (toJson runnerState.vanDerPolOscillator)
-
-def systemRunner (state : IO.Ref ServerState) : IO Unit := do
-  let mut runnerState := initialRunnerState
-  let mut params := defaultParams
+def runnerLoop (stateRef : IO.Ref ServerState) : IO Unit := do
   while true do
-    let s ← state.get
-    match s with
-    | .running => do
-        runnerState := stepRunner params runnerState
-        WebSocket.broadcast (runnerStateToJson runnerState)
-    | .stepping => do
-        runnerState := stepRunner params runnerState
-        WebSocket.broadcast (runnerStateToJson runnerState)
-        state.set .paused
-    | .changingSystem system => do
-        runnerState := { runnerState with currentSystem := system }
-        WebSocket.broadcast (runnerStateToJson runnerState)
-        state.set .running
-    | _ => pure ()
+    let state ← stateRef.get
+    match state.runState with
+    | .running =>
+      let newState := stepServer state
+      stateRef.set newState
+      WebSocket.broadcast (serverStateToJson newState)
+      WebSocket.service 1  -- Flush the broadcast
+    | .stepping =>
+      let newState := stepServer state
+      stateRef.set { newState with runState := .paused }
+      WebSocket.broadcast (serverStateToJson newState)
+      WebSocket.service 1  -- Flush the broadcast
+    | .paused =>
+      IO.sleep 10  -- Don't spin when paused
 
+-- ============================================================================
 -- Main server
-def serverLoop (state : IO.Ref ServerState) : IO Unit := do
-  -- Start dynamical system tasks
-  let _ ← IO.asTask (systemRunner state)
+-- ============================================================================
 
-  -- Main loop handles WebSocket messages
+def serverLoop (stateRef : IO.Ref ServerState) : IO Unit := do
+  -- Start runner in background task
+  let _ ← IO.asTask (runnerLoop stateRef)
+
+  -- Main loop: handle messages
   while true do
-    -- Check for incoming messages
     match ← WebSocket.receiveNonBlocking with
-    | some msg => handleMessage state msg
+    | some msg => handleMessage stateRef msg
     | none => pure ()
-
-    -- Service WebSocket
     WebSocket.service 10
 
 def main : IO Unit := do
-  IO.println "Starting Lean dynamical systems server on port 8081..."
+  IO.println "Starting Rectify optimization server on port 8081..."
 
-  -- Initialize state
-  let state ← IO.mkRef .paused
+  let seed ← IO.rand 0 1000000
+  let stateRef ← IO.mkRef (initServerState seed)
+
   try
     WebSocket.init 8081
 
     -- Send initial state
-    WebSocket.broadcast (runnerStateToJson initialRunnerState)
+    let state ← stateRef.get
+    WebSocket.broadcast (serverStateToJson state)
 
-    serverLoop state
+    serverLoop stateRef
   catch e =>
     IO.eprintln s!"Error: {e}"
 
   WebSocket.destroy
   IO.println "Server shutdown complete"
+
+end Rectify
