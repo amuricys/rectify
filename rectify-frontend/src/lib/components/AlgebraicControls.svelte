@@ -105,7 +105,9 @@
 						</div>
 						<div class="system-state">
 							{#each sys.state as val, i}
-								<span class="state-val" title={`State ${i + 1}`}>{val.toFixed(2)}</span>
+								{@const tmpl = algebraic.templateList.find(t => t.id === sys.templateId)}
+								{@const name = tmpl?.state_names?.[i] ?? `v${i}`}
+								<span class="state-val" title={name}><span class="state-name">{name}:</span> {val.toFixed(2)}</span>
 							{/each}
 						</div>
 					</div>
@@ -343,6 +345,11 @@
 		color: var(--text-dim);
 		font-family: monospace;
 		font-size: 0.7rem;
+	}
+
+	.state-name {
+		color: var(--text-muted, #888);
+		font-weight: bold;
 	}
 
 	.wire-form {
