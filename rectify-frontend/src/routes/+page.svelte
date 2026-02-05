@@ -11,6 +11,39 @@
 	type Tab = 'optimization' | 'dynamics';
 	let activeTab = $state<Tab>('dynamics');
 
+	// Sidebar state
+	let sidebarWidth = $state(260);
+	let sidebarCollapsed = $state(false);
+	let isResizingSidebar = false;
+	let resizeStartX = 0;
+	let resizeStartWidth = 0;
+	const SIDEBAR_MIN = 180;
+	const SIDEBAR_MAX = 450;
+
+	function onSidebarResizeStart(event: MouseEvent) {
+		isResizingSidebar = true;
+		resizeStartX = event.clientX;
+		resizeStartWidth = sidebarWidth;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		window.addEventListener('mousemove', onSidebarResizeMove);
+		window.addEventListener('mouseup', onSidebarResizeEnd);
+	}
+
+	function onSidebarResizeMove(event: MouseEvent) {
+		if (!isResizingSidebar) return;
+		const delta = event.clientX - resizeStartX;
+		sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, resizeStartWidth + delta));
+	}
+
+	function onSidebarResizeEnd() {
+		isResizingSidebar = false;
+		document.body.style.cursor = '';
+		document.body.style.userSelect = '';
+		window.removeEventListener('mousemove', onSidebarResizeMove);
+		window.removeEventListener('mouseup', onSidebarResizeEnd);
+	}
+
 	// Auto-connect to the appropriate backend when switching tabs
 	$effect(() => {
 		if (activeTab === 'optimization') {
@@ -49,29 +82,35 @@
 	</header>
 
 	<main>
-		{#if activeTab === 'optimization'}
-			<aside>
-				<OptimizationControls />
+		{#if !sidebarCollapsed}
+			<aside style="width: {sidebarWidth}px;">
+				{#if activeTab === 'optimization'}
+					<OptimizationControls />
+				{:else}
+					<AlgebraicControls />
+				{/if}
 			</aside>
-			<section class="viewport">
-				<Renderer>
-					{#snippet children({ width, height })}
-						<TSPRenderer {width} {height} />
-					{/snippet}
-				</Renderer>
-			</section>
-		{:else}
-			<aside>
-				<AlgebraicControls />
-			</aside>
-			<section class="viewport">
-				<Renderer>
-					{#snippet children({ width, height })}
-						<AlgebraicRenderer {width} {height} />
-					{/snippet}
-				</Renderer>
-			</section>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="sidebar-handle" onmousedown={onSidebarResizeStart}>
+				<div class="handle-line"></div>
+			</div>
 		{/if}
+		<div class="collapse-rail">
+			<button class="collapse-btn" onclick={() => sidebarCollapsed = !sidebarCollapsed} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}>
+				{sidebarCollapsed ? '▶' : '◀'}
+			</button>
+		</div>
+		<section class="viewport">
+			<Renderer>
+				{#snippet children({ width, height })}
+					{#if activeTab === 'optimization'}
+						<TSPRenderer {width} {height} />
+					{:else}
+						<AlgebraicRenderer {width} {height} />
+					{/if}
+				{/snippet}
+			</Renderer>
+		</section>
 	</main>
 </div>
 
@@ -135,6 +174,61 @@
 
 	aside {
 		flex-shrink: 0;
+		overflow: hidden;
+		border-right: 1px solid var(--border);
+	}
+
+	.sidebar-handle {
+		flex-shrink: 0;
+		width: 5px;
+		cursor: col-resize;
+		background: transparent;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.15s;
+	}
+
+	.sidebar-handle:hover,
+	.sidebar-handle:active {
+		background: var(--border);
+	}
+
+	.handle-line {
+		width: 1px;
+		height: 40px;
+		background: var(--border);
+		border-radius: 1px;
+	}
+
+	.sidebar-handle:hover .handle-line,
+	.sidebar-handle:active .handle-line {
+		background: var(--accent);
+		width: 2px;
+	}
+
+	.collapse-rail {
+		flex-shrink: 0;
+		display: flex;
+		align-items: flex-start;
+		padding-top: 0.5rem;
+	}
+
+	.collapse-btn {
+		background: var(--bg-panel);
+		border: 1px solid var(--border);
+		border-left: none;
+		color: var(--text-dim);
+		font-size: 0.55rem;
+		padding: 0.4rem 0.2rem;
+		cursor: pointer;
+		line-height: 1;
+		border-radius: 0 3px 3px 0;
+	}
+
+	.collapse-btn:hover {
+		color: var(--accent);
+		border-color: var(--accent);
 	}
 
 	.viewport {

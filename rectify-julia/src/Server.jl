@@ -229,12 +229,15 @@ function handle_set_params!(state::ServerState, msg::Dict{String, Any})
     params = Dict{String, Float64}(String(k) => Float64(v) for (k, v) in params_raw)
 
     try
-        # For now, just update the stored params
-        # Full implementation would recreate the machine with new params
         set_system_params!(world, instance_id, params)
 
-        # TODO: Recreate machine if dynamics depend on params
-        # This requires access to the system registry
+        # Recreate machine with new parameters
+        sys = world.systems[instance_id]
+        new_machine, _ = Systems.create_system(sys.template_id, params)
+        sys.machine = new_machine
+
+        # Trigger recomposition with new machine
+        recompose!(state)
 
         return Dict("type" => "Ack", "success" => true, "action" => "SetParams", "instanceId" => instance_id)
     catch e
@@ -303,7 +306,8 @@ function handle_define_custom_system!(state::ServerState, msg::Dict{String, Any}
     state_vars = String.(get(msg, "stateVars", String[]))
     equations = String.(get(msg, "equations", String[]))
     params_raw = get(msg, "parameters", [])
-    inputs = String.(get(msg, "inputs", String[]))
+    inputs_raw = get(msg, "inputs", [])
+    inputs = isempty(inputs_raw) ? String[] : String.(inputs_raw)
     initial_state = Float64.(get(msg, "initialState", Float64[]))
 
     # Convert parameters to tuples
@@ -368,35 +372,52 @@ end
 
 function simulation_loop(state::ServerState)
     target_frame_time = 1/60  # 60 Hz broadcast rate
+    error_count = 0
 
     while true
         frame_start = time()
 
         if state.world.running
-            # Check if recomposition is needed
-            if state.world.needs_recomposition
-                recompose!(state)
-            end
+            try
+                # Check if recomposition is needed
+                if state.world.needs_recomposition
+                    recompose!(state)
+                end
 
-            # Calculate how many simulation steps per frame
-            sim_dt = state.world.dt
-            frame_dt = target_frame_time * state.world.speed
-            steps_per_frame = max(1, round(Int, frame_dt / sim_dt))
+                # Calculate how many simulation steps per frame
+                sim_dt = state.world.dt
+                frame_dt = target_frame_time * state.world.speed
+                steps_per_frame = max(1, round(Int, frame_dt / sim_dt))
 
-            # Run simulation steps
-            for _ in 1:steps_per_frame
-                if state.composed !== nothing
-                    step_world!(state.world, state.composed, sim_dt)
-                else
-                    step_world_independent!(state.world, sim_dt)
+                # Run simulation steps
+                for _ in 1:steps_per_frame
+                    if state.composed !== nothing
+                        step_world!(state.world, state.composed, sim_dt)
+                    else
+                        step_world_independent!(state.world, sim_dt)
+                    end
+                end
+
+                # Record history for visualization trails
+                record_history!(state.world)
+
+                # Broadcast state update
+                broadcast_state_update(state)
+                error_count = 0
+            catch e
+                error_count += 1
+                if error_count <= 3
+                    println("Simulation error ($(error_count)): $e")
+                    println(stacktrace(catch_backtrace()))
+                end
+                # Try to recover by recomposing
+                try
+                    recompose!(state)
+                catch e2
+                    println("Recovery recompose failed: $e2")
+                    state.composed = nothing
                 end
             end
-
-            # Record history for visualization trails
-            record_history!(state.world)
-
-            # Broadcast state update
-            broadcast_state_update(state)
         end
 
         # Sleep to maintain frame rate

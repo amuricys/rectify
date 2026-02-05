@@ -530,7 +530,7 @@ function list_templates()
         "state_names" => t.state_names,
         "input_names" => t.input_names,
         "output_names" => t.output_names,
-        "input_defaults" => t.input_defaults
+        "input_defaults" => [isnan(v) ? nothing : v for v in t.input_defaults]
     ) for t in values(SYSTEM_REGISTRY)]
 end
 

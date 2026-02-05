@@ -88,8 +88,10 @@
 		gap: 1rem;
 		padding: 1rem;
 		background: var(--bg-panel);
-		border: 1px solid var(--border);
-		min-width: 200px;
+		width: 100%;
+		height: 100%;
+		overflow-y: auto;
+		box-sizing: border-box;
 	}
 
 	.control-group {

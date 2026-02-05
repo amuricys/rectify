@@ -190,9 +190,10 @@ function build_custom_dynamics(
     end
     """
 
-    # Compile the function
+    # Compile the function (wrap with invokelatest to avoid world age issues)
     func_expr = Meta.parse(func_str)
-    dynamics_fn = Base.eval(CustomSystems, func_expr)
+    dynamics_fn_raw = Base.eval(CustomSystems, func_expr)
+    dynamics_fn = (u, x, p, t) -> Base.invokelatest(dynamics_fn_raw, u, x, p, t)
 
     # Readout: return all state variables
     readout_fn = (u, p, t) -> u
@@ -223,9 +224,10 @@ function validate_and_register_custom_system!(
     state_vars::Vector{String},
     equations::Vector{String},
     params::Vector{Tuple{String, Float64}},
-    inputs::Vector{String},
+    inputs,
     initial_state::Vector{Float64}
 )
+    inputs = convert(Vector{String}, inputs)
     # Validate name
     if isempty(name) || !occursin(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name)
         return false, "Invalid system name: '$name'"

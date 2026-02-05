@@ -118,6 +118,7 @@ function compose_systems(
         # First compute all outputs (needed for wiring)
         outputs = Dict{String, Vector{Float64}}()
         for sys_id in system_order
+            haskey(systems, sys_id) || continue
             sys = systems[sys_id]
             range = system_ranges[sys_id]
             sys_state = u[range]
@@ -126,6 +127,7 @@ function compose_systems(
 
         # Now compute dynamics for each system
         for sys_id in system_order
+            haskey(systems, sys_id) || continue
             sys = systems[sys_id]
             range = system_ranges[sys_id]
             sys_state = u[range]

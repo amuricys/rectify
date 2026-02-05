@@ -15,6 +15,9 @@
 	let wireTo = $state<string>('');
 	let wireToPort = $state(1);
 
+	// Template hover popup
+	let hoveredTemplate = $state<string | null>(null);
+
 	function createWire() {
 		if (wireFrom && wireTo && wireFrom !== wireTo) {
 			algebraic.wire(wireFrom, wireFromPort, wireTo, wireToPort);
@@ -82,13 +85,30 @@
 			<span class="label">Add System</span>
 			<div class="template-grid">
 				{#each algebraic.templateList as template}
-					<button
-						class="template-btn"
-						onclick={() => algebraic.addSystem(template.id, { x: Math.random() * 100, y: Math.random() * 100 })}
-						title={`${template.nstates} states, ${template.ninputs} in, ${template.noutputs} out`}
-					>
-						{template.name}
-					</button>
+					<div class="template-wrapper">
+						<button
+							class="template-btn"
+							onclick={() => algebraic.addSystem(template.id, { x: Math.random() * 100, y: Math.random() * 100 })}
+							onmouseenter={() => hoveredTemplate = template.id}
+							onmouseleave={() => hoveredTemplate = null}
+						>
+							{template.name}
+						</button>
+						{#if hoveredTemplate === template.id}
+							<div class="template-popup">
+								<div class="popup-heading">states</div>
+								{#each template.state_names as name}
+									<div class="popup-item">{name} : &#x211D;</div>
+								{/each}
+								{#if template.parameters.length > 0}
+									<div class="popup-heading">params</div>
+									{#each template.parameters as p}
+										<div class="popup-item">{p.name} = {p.default}</div>
+									{/each}
+								{/if}
+							</div>
+						{/if}
+					</div>
 				{/each}
 			</div>
 		</div>
@@ -191,11 +211,10 @@
 		gap: 1rem;
 		padding: 1rem;
 		background: var(--bg-panel);
-		border-right: 1px solid var(--border);
-		min-width: 240px;
-		max-width: 280px;
-		max-height: 100%;
+		width: 100%;
+		height: 100%;
 		overflow-y: auto;
+		box-sizing: border-box;
 	}
 
 	.control-group {
@@ -292,9 +311,48 @@
 		gap: 0.25rem;
 	}
 
+	.template-wrapper {
+		position: relative;
+	}
+
 	.template-btn {
 		font-size: 0.7rem;
 		padding: 0.3rem;
+		width: 100%;
+	}
+
+	.template-popup {
+		position: absolute;
+		left: 100%;
+		top: 0;
+		margin-left: 0.25rem;
+		background: var(--bg-dark);
+		border: 1px solid var(--accent);
+		padding: 0.35rem 0.5rem;
+		font-size: 0.65rem;
+		z-index: 100;
+		min-width: 80px;
+	}
+
+	.popup-heading {
+		color: var(--text-dim);
+		font-weight: bold;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-top: 0.25rem;
+		margin-bottom: 0.1rem;
+	}
+
+	.popup-heading:first-child {
+		margin-top: 0;
+	}
+
+	.popup-item {
+		color: var(--accent);
+		font-family: monospace;
+		font-size: 0.65rem;
+		padding-left: 0.25rem;
 	}
 
 	select,

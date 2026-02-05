@@ -86,6 +86,9 @@
 		outputPorts: PortDot[];
 		inputPorts: PortDot[];
 		portDividerLine: THREE.Line | null;
+		// Edit button
+		editButton: THREE.Mesh;
+		editButtonLabel: THREE.Sprite;
 	}
 
 	// B3: Port dot visual
@@ -108,6 +111,8 @@
 		fromPort: number;
 		toSystemId: string;
 		toPort: number;
+		valueLine: THREE.Line;
+		valueGeometry: THREE.BufferGeometry;
 	}
 
 	// Colors for individual state variables in time series view
@@ -123,8 +128,8 @@
 	const STATE_NAMES = ['x', 'y', 'z', 'w', 'v', 'u'];
 	const TIME_WINDOW_SAMPLES = 500;
 	const MIN_WINDOW_SIZE = 25;
-	const DEFAULT_WINDOW_WIDTH = 40;
-	const DEFAULT_WINDOW_HEIGHT = 40;
+	const DEFAULT_WINDOW_WIDTH = 46;
+	const DEFAULT_WINDOW_HEIGHT = 46;
 	const TS_MARGIN = { left: 10, right: 12, bottom: 8, top: 4 };
 	const NUM_TICKS = 5;
 	const PHASE_HALF_EXTENT = 14; // local units for phase mapping
@@ -143,10 +148,15 @@
 	let isPanning = false;
 	let rotateStart = new THREE.Vector2();
 
+	// Edit system state
+	let editingSystemId: string | null = $state(null);
+
 	// B6: Wire drag state
 	let isWiring = false;
 	let wireSourcePort: PortDot | null = null;
 	let wireDragLine: THREE.Line | null = null;
+	let lastWireDragTime = 0;
+	const WIRE_DRAG_MAX_VERTS = 50;
 
 	// B4: Wire visuals
 	const wireVisuals = new Map<string, WireVisual>();
@@ -642,10 +652,10 @@
 		hitArea.position.set(xOffset, yPos, 4);
 		hitArea.userData = { isPort: true, systemId, portIndex, isOutput };
 
-		// Label (inside window)
-		const labelOffset = isOutput ? -3 : 3;
+		// Label (outside box)
+		const labelOffset = isOutput ? 5 : -5;
 		const label = createTextSprite(portName, new THREE.Color(0x9a8b78));
-		label.scale.set(5, 1.5, 1);
+		label.scale.set(8, 2.5, 1);
 		label.position.set(xOffset + labelOffset, yPos, 5);
 
 		return { mesh, ring, hitArea, label, systemId, portIndex, isOutput };
@@ -757,58 +767,104 @@
 		const key = (c: number, r: number) => r * cols + c;
 		const heuristic = (c: number, r: number) => Math.abs(c - endCol) + Math.abs(r - endRow);
 
-		const open = new Map<number, { c: number; r: number; g: number; f: number; parent: number | null }>();
-		const closed = new Set<number>();
-
 		const startKey = key(startCol, startRow);
-		open.set(startKey, { c: startCol, r: startRow, g: 0, f: heuristic(startCol, startRow), parent: null });
+		const endKey = key(endCol, endRow);
+
+		const gScore = new Map<number, number>();
+		const fScore = new Map<number, number>();
+		const cameFrom = new Map<number, number>();
+		const openSet = new Set<number>();
+		const closed = new Set<number>();
+		const nodePos = new Map<number, { c: number; r: number }>();
+
+		gScore.set(startKey, 0);
+		fScore.set(startKey, heuristic(startCol, startRow));
+		openSet.add(startKey);
+		nodePos.set(startKey, { c: startCol, r: startRow });
 
 		const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 		let found = false;
 		let iterations = 0;
-		const maxIterations = 2000;
+		const maxIterations = 3000;
 
-		while (open.size > 0 && iterations < maxIterations) {
+		while (openSet.size > 0 && iterations < maxIterations) {
 			iterations++;
-			// Find lowest f
+			// Find lowest f in open set
 			let bestKey = -1;
 			let bestF = Infinity;
-			for (const [k, node] of open) {
-				if (node.f < bestF) {
-					bestF = node.f;
+			for (const k of openSet) {
+				const f = fScore.get(k) ?? Infinity;
+				if (f < bestF) {
+					bestF = f;
 					bestKey = k;
 				}
 			}
 			if (bestKey === -1) break;
 
-			const current = open.get(bestKey)!;
-			open.delete(bestKey);
-			closed.add(bestKey);
-
-			if (current.c === endCol && current.r === endRow) {
+			if (bestKey === endKey) {
 				found = true;
-				// Reconstruct path
-				const path: THREE.Vector3[] = [];
-				let node: typeof current | null = current;
-				const allNodes = new Map<number, typeof current>();
-				// We need to track all nodes — rebuild from closed
-				// Actually we stored parent as key, so let's keep a separate map
-				break; // We'll use the simpler fallback below
+				break;
 			}
 
+			openSet.delete(bestKey);
+			closed.add(bestKey);
+
+			const pos = nodePos.get(bestKey)!;
+			const currentG = gScore.get(bestKey)!;
+
 			for (const [dc, dr] of dirs) {
-				const nc = current.c + dc;
-				const nr = current.r + dr;
+				const nc = pos.c + dc;
+				const nr = pos.r + dr;
 				if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
 				const nk = key(nc, nr);
 				if (closed.has(nk) || blocked.has(nk)) continue;
 
-				const ng = current.g + 1;
-				const existing = open.get(nk);
-				if (!existing || ng < existing.g) {
-					open.set(nk, { c: nc, r: nr, g: ng, f: ng + heuristic(nc, nr), parent: bestKey });
+				const ng = currentG + 1;
+				const prevG = gScore.get(nk);
+				if (prevG === undefined || ng < prevG) {
+					gScore.set(nk, ng);
+					fScore.set(nk, ng + heuristic(nc, nr));
+					cameFrom.set(nk, bestKey);
+					nodePos.set(nk, { c: nc, r: nr });
+					openSet.add(nk);
 				}
 			}
+		}
+
+		if (found) {
+			// Reconstruct path from endKey to startKey
+			const rawPath: THREE.Vector3[] = [];
+			let cur = endKey;
+			while (cur !== startKey) {
+				const p = nodePos.get(cur)!;
+				rawPath.push(new THREE.Vector3(minX + p.c * cellSize, minY + p.r * cellSize, 3));
+				const prev = cameFrom.get(cur);
+				if (prev === undefined) break;
+				cur = prev;
+			}
+			rawPath.push(new THREE.Vector3(from.x, from.y, 3));
+			rawPath.reverse();
+			rawPath.push(new THREE.Vector3(to.x, to.y, 3));
+
+			// Remove collinear points
+			if (rawPath.length > 2) {
+				const simplified: THREE.Vector3[] = [rawPath[0]];
+				for (let i = 1; i < rawPath.length - 1; i++) {
+					const prev = rawPath[i - 1];
+					const curr = rawPath[i];
+					const next = rawPath[i + 1];
+					const dx1 = curr.x - prev.x;
+					const dy1 = curr.y - prev.y;
+					const dx2 = next.x - curr.x;
+					const dy2 = next.y - curr.y;
+					if (Math.abs(dx1 * dy2 - dy1 * dx2) > 0.01) {
+						simplified.push(curr);
+					}
+				}
+				simplified.push(rawPath[rawPath.length - 1]);
+				return simplified;
+			}
+			return rawPath;
 		}
 
 		// Fallback: simple Z-route (right from source, then vertical, then right to target)
@@ -840,7 +896,15 @@
 		const line = new THREE.Line(geometry, material);
 		scene.add(line);
 
-		return { wireId, line, geometry, fromSystemId: fromSysId, fromPort, toSystemId: toSysId, toPort };
+		// Value whisker line (4 points)
+		const valueGeometry = new THREE.BufferGeometry();
+		valueGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+		valueGeometry.setDrawRange(0, 0);
+		const valueMat = new THREE.LineBasicMaterial({ color: 0xc9a84c, transparent: true, opacity: 0.4, depthTest: false });
+		const valueLine = new THREE.Line(valueGeometry, valueMat);
+		scene.add(valueLine);
+
+		return { wireId, line, geometry, fromSystemId: fromSysId, fromPort, toSystemId: toSysId, toPort, valueLine, valueGeometry };
 	}
 
 	// B7: Update wire route
@@ -889,6 +953,9 @@
 				scene.remove(wv.line);
 				wv.geometry.dispose();
 				(wv.line.material as THREE.Material).dispose();
+				scene.remove(wv.valueLine);
+				wv.valueGeometry.dispose();
+				(wv.valueLine.material as THREE.Material).dispose();
 				wireVisuals.delete(id);
 			}
 		}
@@ -901,17 +968,57 @@
 				wireVisuals.set(wire.id, wv);
 			}
 			updateWireRoute(wv);
+
+			// Update value whisker on the output port
+			const fromWin = systemWindows.get(wire.fromSystem);
+			if (fromWin) {
+				const fromPortDot = fromWin.outputPorts.find(p => p.portIndex === wire.fromPort);
+				if (fromPortDot) {
+					const portWorld = getPortWorldPos(fromPortDot);
+					// Get wire direction from first segment
+					const routePos = wv.geometry.attributes.position?.array as Float32Array | undefined;
+					if (routePos && routePos.length >= 6) {
+						const dx = routePos[3] - routePos[0];
+						const dy = routePos[4] - routePos[1];
+						const len = Math.sqrt(dx * dx + dy * dy);
+						if (len > 0.1) {
+							// Perpendicular direction
+							const perpX = -dy / len;
+							const perpY = dx / len;
+							const deflection = Math.tanh(wire.value / 5) * 3;
+							const valPos = wv.valueGeometry.attributes.position.array as Float32Array;
+							// 4-point whisker: port → out along wire → deflected → back
+							valPos[0] = portWorld.x; valPos[1] = portWorld.y; valPos[2] = 4;
+							valPos[3] = portWorld.x + dx / len * 2; valPos[4] = portWorld.y + dy / len * 2; valPos[5] = 4;
+							valPos[6] = portWorld.x + dx / len * 2 + perpX * deflection; valPos[7] = portWorld.y + dy / len * 2 + perpY * deflection; valPos[8] = 4;
+							valPos[9] = portWorld.x + dx / len * 4 + perpX * deflection * 0.5; valPos[10] = portWorld.y + dy / len * 4 + perpY * deflection * 0.5; valPos[11] = 4;
+							wv.valueGeometry.attributes.position.needsUpdate = true;
+							wv.valueGeometry.setDrawRange(0, 4);
+						}
+					}
+				}
+			}
 		}
 
-		// Update input port opacity
+		// Update input port opacity and connected label shift
 		const connectedInputs = new Set<string>();
+		const connectedOutputs = new Set<string>();
 		for (const wire of wires) {
 			connectedInputs.add(`${wire.toSystem}:${wire.toPort}`);
+			connectedOutputs.add(`${wire.fromSystem}:${wire.fromPort}`);
 		}
 		for (const win of systemWindows.values()) {
 			for (const port of win.inputPorts) {
 				const connected = connectedInputs.has(`${port.systemId}:${port.portIndex}`);
 				(port.mesh.material as THREE.MeshBasicMaterial).opacity = connected ? 0.8 : 0.3;
+				// Shift label up when wire is connected to avoid overlap
+				const baseY = port.mesh.position.y;
+				port.label.position.y = connected ? baseY + 2 : baseY;
+			}
+			for (const port of win.outputPorts) {
+				const connected = connectedOutputs.has(`${port.systemId}:${port.portIndex}`);
+				const baseY = port.mesh.position.y;
+				port.label.position.y = connected ? baseY + 2 : baseY;
 			}
 		}
 	}
@@ -1003,6 +1110,19 @@
 		resizeHandle.position.set(winWidth / 2 - 2, -winHeight / 2 - HEADER_HEIGHT + 2, 1);
 		resizeHandle.userData = { isResizeHandle: true, systemId: id };
 		group.add(resizeHandle);
+
+		// Edit button (bottom-left of header)
+		const editButtonGeom = new THREE.PlaneGeometry(6, 3);
+		const editButtonMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const editButton = new THREE.Mesh(editButtonGeom, editButtonMat);
+		editButton.position.set(winWidth / 2 - 36, winHeight / 2, 1);
+		editButton.userData = { isEditButton: true, systemId: id };
+		group.add(editButton);
+
+		const editButtonLabel = createButtonSprite('Edit', false);
+		editButtonLabel.position.set(winWidth / 2 - 36, winHeight / 2, 2);
+		editButtonLabel.scale.set(6, 3.5, 1);
+		group.add(editButtonLabel);
 
 		// === Phase Space View ===
 		const contentGroup = new THREE.Group();
@@ -1116,7 +1236,8 @@
 			windowWidth: winWidth, windowHeight: winHeight,
 			bounds: { min: new THREE.Vector3(Infinity, Infinity, Infinity), max: new THREE.Vector3(-Infinity, -Infinity, -Infinity), initialized: false },
 			tsYMin: Infinity, tsYMax: -Infinity,
-			outputPorts, inputPorts, portDividerLine: dividerLine
+			outputPorts, inputPorts, portDividerLine: dividerLine,
+			editButton, editButtonLabel
 		};
 	}
 
@@ -1213,6 +1334,8 @@
 		win.timeButtonLabel.position.set(newWidth / 2 - 6, newHeight / 2, 2);
 		win.viewCycleButton.position.set(newWidth / 2 - 26, newHeight / 2, 1);
 		win.viewCycleLabel.position.set(newWidth / 2 - 26, newHeight / 2, 2);
+		win.editButton.position.set(newWidth / 2 - 36, newHeight / 2, 1);
+		win.editButtonLabel.position.set(newWidth / 2 - 36, newHeight / 2, 2);
 
 		win.resizeHandle.position.set(newWidth / 2 - 2, -newHeight / 2 - HEADER_HEIGHT + 2, 1);
 
@@ -1242,6 +1365,44 @@
 
 		for (let i = 0; i < win.legendSprites.length; i++) {
 			win.legendSprites[i].position.set(newWidth / 2 - 5, newHeight / 2 - 4 - i * 3, 1);
+		}
+
+		// Reposition port dots
+		const contentTop = newHeight / 2 - HEADER_HEIGHT;
+		const contentBottom = -newHeight / 2;
+		const contentHeight = contentTop - contentBottom;
+
+		for (let i = 0; i < win.outputPorts.length; i++) {
+			const port = win.outputPorts[i];
+			const t = (i + 1) / (win.outputPorts.length + 1);
+			const yPos = contentBottom + t * contentHeight;
+			const xPos = newWidth / 2;
+			port.mesh.position.set(xPos, yPos, 5);
+			port.ring.position.set(xPos, yPos, 5);
+			port.hitArea.position.set(xPos, yPos, 4);
+			port.label.position.set(xPos + 5, yPos, 5);
+		}
+
+		for (let i = 0; i < win.inputPorts.length; i++) {
+			const port = win.inputPorts[i];
+			const t = (i + 1) / (win.inputPorts.length + 1);
+			const yPos = contentBottom + (1 - t) * contentHeight;
+			const xPos = -newWidth / 2;
+			port.mesh.position.set(xPos, yPos, 5);
+			port.ring.position.set(xPos, yPos, 5);
+			port.hitArea.position.set(xPos, yPos, 4);
+			port.label.position.set(xPos - 5, yPos, 5);
+		}
+
+		// Reposition divider line
+		if (win.portDividerLine && win.inputPorts.length > win.nstates) {
+			const dividerY = contentBottom + (1 - (win.nstates + 0.5) / (win.inputPorts.length + 1)) * contentHeight;
+			const divPos = win.portDividerLine.geometry.attributes.position.array as Float32Array;
+			divPos[0] = -newWidth / 2 - 1;
+			divPos[1] = dividerY;
+			divPos[3] = -newWidth / 2 + 6;
+			divPos[4] = dividerY;
+			win.portDividerLine.geometry.attributes.position.needsUpdate = true;
 		}
 	}
 
@@ -1386,6 +1547,10 @@
 			(win.viewCycleLabel.material as THREE.Material).dispose();
 			(win.resizeHandle.material as THREE.Material).dispose();
 			win.resizeHandle.geometry.dispose();
+			(win.editButton.material as THREE.Material).dispose();
+			win.editButton.geometry.dispose();
+			(win.editButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
+			(win.editButtonLabel.material as THREE.Material).dispose();
 			win.border.geometry.dispose();
 			(win.border.material as THREE.Material).dispose();
 			win.tsAxisLines.geometry.dispose();
@@ -1424,6 +1589,21 @@
 		}
 	}
 
+	function getEditorScreenPos(systemId: string): { x: number; y: number } | null {
+		const win = systemWindows.get(systemId);
+		if (!win || !camera || !canvasEl) return null;
+		const rect = canvasEl.getBoundingClientRect();
+		// World position of the right edge of the window, header height
+		const worldX = win.group.position.x + win.windowWidth / 2 + 2;
+		const worldY = win.group.position.y + win.windowHeight / 2;
+		// Convert world to screen
+		const ndcX = worldX / ((camera.right - camera.left) / 2);
+		const ndcY = worldY / ((camera.top - camera.bottom) / 2);
+		const screenX = ((ndcX + 1) / 2) * rect.width;
+		const screenY = ((1 - ndcY) / 2) * rect.height;
+		return { x: screenX, y: screenY };
+	}
+
 	function screenToWorld(screenX: number, screenY: number): THREE.Vector2 {
 		const rect = canvasEl.getBoundingClientRect();
 		const ndcX = ((screenX - rect.left) / rect.width) * 2 - 1;
@@ -1442,14 +1622,25 @@
 		const phaseButtons: THREE.Mesh[] = [];
 		const timeButtons: THREE.Mesh[] = [];
 		const viewCycleButtons: THREE.Mesh[] = [];
+		const editButtons: THREE.Mesh[] = [];
 		const resizeHandles: THREE.Mesh[] = [];
 		const headers: THREE.Mesh[] = [];
 		for (const win of systemWindows.values()) {
 			phaseButtons.push(win.phaseButton);
 			timeButtons.push(win.timeButton);
 			if (win.viewCycleButton.visible) viewCycleButtons.push(win.viewCycleButton);
+			editButtons.push(win.editButton);
 			resizeHandles.push(win.resizeHandle);
 			headers.push(win.header);
+		}
+
+		// Edit button
+		const editIntersects = raycaster.intersectObjects(editButtons);
+		if (editIntersects.length > 0) {
+			const button = editIntersects[0].object as THREE.Mesh;
+			const systemId = button.userData.systemId;
+			editingSystemId = editingSystemId === systemId ? null : systemId;
+			return;
 		}
 
 		// A6: Check view cycle buttons
@@ -1498,10 +1689,12 @@
 				if (port) {
 					isWiring = true;
 					wireSourcePort = port;
-					// Create drag line
+					lastWireDragTime = 0;
+					// Create drag line with pre-allocated vertices for pathfinding
 					const dragGeom = new THREE.BufferGeometry();
-					dragGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-					const dragMat = new THREE.LineBasicMaterial({ color: 0xc9a84c, transparent: true, opacity: 0.5, depthTest: false });
+					dragGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(WIRE_DRAG_MAX_VERTS * 3), 3));
+					dragGeom.setDrawRange(0, 2);
+					const dragMat = new THREE.LineBasicMaterial({ color: 0xc9a84c, transparent: true, opacity: 0.3, depthTest: false });
 					wireDragLine = new THREE.Line(dragGeom, dragMat);
 					scene.add(wireDragLine);
 					canvasEl.style.cursor = 'crosshair';
@@ -1532,9 +1725,11 @@
 						// Start new wire drag
 						isWiring = true;
 						wireSourcePort = fromPort;
+						lastWireDragTime = 0;
 						const dragGeom = new THREE.BufferGeometry();
-						dragGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-						const dragMat = new THREE.LineBasicMaterial({ color: 0xc9a84c, transparent: true, opacity: 0.5, depthTest: false });
+						dragGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(WIRE_DRAG_MAX_VERTS * 3), 3));
+						dragGeom.setDrawRange(0, 2);
+						const dragMat = new THREE.LineBasicMaterial({ color: 0xc9a84c, transparent: true, opacity: 0.3, depthTest: false });
 						wireDragLine = new THREE.Line(dragGeom, dragMat);
 						scene.add(wireDragLine);
 						canvasEl.style.cursor = 'crosshair';
@@ -1554,6 +1749,7 @@
 				draggedWindow = win;
 				dragStart.set(event.clientX, event.clientY);
 				windowStartSize.set(win.windowWidth, win.windowHeight);
+				windowStartPos.set(win.group.position.x, win.group.position.y);
 				canvasEl.style.cursor = 'nwse-resize';
 			}
 			return;
@@ -1608,17 +1804,43 @@
 	function onMouseMove(event: MouseEvent) {
 		updateMousePosition(event);
 
-		// B6: Wire drag line update
+		// B6: Wire drag line update with pathfinding
 		if (isWiring && wireSourcePort && wireDragLine) {
 			const worldPos = screenToWorld(event.clientX, event.clientY);
 			const fromPos = getPortWorldPos(wireSourcePort);
 			const positions = wireDragLine.geometry.attributes.position.array as Float32Array;
-			positions[0] = fromPos.x;
-			positions[1] = fromPos.y;
-			positions[2] = 3;
-			positions[3] = worldPos.x;
-			positions[4] = worldPos.y;
-			positions[5] = 3;
+
+			const now = performance.now();
+			if (now - lastWireDragTime > 50) {
+				lastWireDragTime = now;
+				// Build obstacles from all windows
+				const obstacles: Array<{ x: number; y: number; w: number; h: number }> = [];
+				for (const win of systemWindows.values()) {
+					obstacles.push({
+						x: win.group.position.x,
+						y: win.group.position.y,
+						w: win.windowWidth,
+						h: win.windowHeight + HEADER_HEIGHT
+					});
+				}
+				const route = computeWireRoute(fromPos, worldPos, obstacles);
+				const nVerts = Math.min(route.length, WIRE_DRAG_MAX_VERTS);
+				for (let i = 0; i < nVerts; i++) {
+					positions[i * 3] = route[i].x;
+					positions[i * 3 + 1] = route[i].y;
+					positions[i * 3 + 2] = route[i].z;
+				}
+				wireDragLine.geometry.setDrawRange(0, nVerts);
+			} else {
+				// Between throttled updates, just update the last vertex position
+				const drawCount = wireDragLine.geometry.drawRange.count;
+				if (drawCount >= 2) {
+					const lastIdx = drawCount - 1;
+					positions[lastIdx * 3] = worldPos.x;
+					positions[lastIdx * 3 + 1] = worldPos.y;
+					positions[lastIdx * 3 + 2] = 3;
+				}
+			}
 			wireDragLine.geometry.attributes.position.needsUpdate = true;
 
 			// Highlight nearby input ports
@@ -1703,6 +1925,11 @@
 
 			const newWidth = windowStartSize.x + deltaWorldX;
 			const newHeight = windowStartSize.y + deltaWorldY;
+			const finalWidth = Math.max(MIN_WINDOW_SIZE, newWidth);
+			const finalHeight = Math.max(MIN_WINDOW_SIZE, newHeight);
+			// Anchor top-left corner: shift group position so top-left stays fixed
+			draggedWindow.group.position.x = windowStartPos.x + (finalWidth - windowStartSize.x) / 2;
+			draggedWindow.group.position.y = windowStartPos.y - (finalHeight - windowStartSize.y) / 2;
 			resizeWindow(draggedWindow, newWidth, newHeight);
 		} else if (isDragging && draggedWindow) {
 			const currentScreen = new THREE.Vector2(event.clientX, event.clientY);
@@ -1724,12 +1951,14 @@
 			const phaseButtons: THREE.Mesh[] = [];
 			const timeButtons: THREE.Mesh[] = [];
 			const viewCycleButtons: THREE.Mesh[] = [];
+			const editButtons: THREE.Mesh[] = [];
 			const resizeHandles: THREE.Mesh[] = [];
 			const headers: THREE.Mesh[] = [];
 			for (const win of systemWindows.values()) {
 				phaseButtons.push(win.phaseButton);
 				timeButtons.push(win.timeButton);
 				if (win.viewCycleButton.visible) viewCycleButtons.push(win.viewCycleButton);
+				editButtons.push(win.editButton);
 				resizeHandles.push(win.resizeHandle);
 				headers.push(win.header);
 			}
@@ -1737,7 +1966,8 @@
 			const phaseIntersects = raycaster.intersectObjects(phaseButtons);
 			const timeIntersects = raycaster.intersectObjects(timeButtons);
 			const viewCycleIntersects = raycaster.intersectObjects(viewCycleButtons);
-			if (phaseIntersects.length > 0 || timeIntersects.length > 0 || viewCycleIntersects.length > 0) {
+			const editIntersects = raycaster.intersectObjects(editButtons);
+			if (phaseIntersects.length > 0 || timeIntersects.length > 0 || viewCycleIntersects.length > 0 || editIntersects.length > 0) {
 				canvasEl.style.cursor = 'pointer';
 				return;
 			}
@@ -1772,6 +2002,11 @@
 			if (inIntersects.length > 0) {
 				const hit = inIntersects[0].object as THREE.Mesh;
 				const { systemId, portIndex } = hit.userData;
+				// Replace existing wire to this input if any
+				const existingWire = algebraic.wireList.find(w => w.toSystem === systemId && w.toPort === portIndex);
+				if (existingWire) {
+					algebraic.unwire(existingWire.id);
+				}
 				algebraic.wire(wireSourcePort.systemId, wireSourcePort.portIndex, systemId, portIndex);
 			}
 
@@ -1887,6 +2122,9 @@
 				scene.remove(wv.line);
 				wv.geometry.dispose();
 				(wv.line.material as THREE.Material).dispose();
+				scene.remove(wv.valueLine);
+				wv.valueGeometry.dispose();
+				(wv.valueLine.material as THREE.Material).dispose();
 			}
 			wireVisuals.clear();
 			if (wireDragLine) {
@@ -1903,12 +2141,113 @@
 	});
 </script>
 
-<canvas bind:this={canvasEl}></canvas>
+<div class="renderer-container">
+	<canvas bind:this={canvasEl}></canvas>
+
+	{#if editingSystemId}
+		{@const sys = algebraic.systemList.find(s => s.id === editingSystemId)}
+		{@const tmpl = sys ? algebraic.templateList.find(t => t.id === sys.templateId) : null}
+		{@const pos = getEditorScreenPos(editingSystemId)}
+		{#if sys && tmpl && pos}
+			<div class="edit-overlay" style="left: {pos.x}px; top: {pos.y}px;">
+				<div class="edit-header">
+					<span>{tmpl.name}</span>
+					<button class="edit-close" onclick={() => editingSystemId = null}>x</button>
+				</div>
+				{#each tmpl.parameters as param, i}
+					<div class="edit-row">
+						<label for="param-{i}">{param.name}</label>
+						<input
+							id="param-{i}"
+							type="number"
+							step="any"
+							value={sys.parameters[param.name] ?? param.default}
+							onchange={(e) => {
+								const val = parseFloat((e.target as HTMLInputElement).value);
+								if (!isNaN(val)) {
+									algebraic.setParams(editingSystemId!, { ...sys.parameters, [param.name]: val });
+								}
+							}}
+						/>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	{/if}
+</div>
 
 <style>
+	.renderer-container {
+		position: relative;
+		width: 100%;
+		height: 100%;
+	}
+
 	canvas {
 		display: block;
 		width: 100%;
 		height: 100%;
+	}
+
+	.edit-overlay {
+		position: absolute;
+		background: #1a1410;
+		border: 1px solid #c9a84c;
+		padding: 0.5rem;
+		min-width: 160px;
+		z-index: 10;
+		font-family: monospace;
+		font-size: 0.75rem;
+		color: #d4c5a0;
+	}
+
+	.edit-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.4rem;
+		color: #c9a84c;
+		font-weight: bold;
+	}
+
+	.edit-close {
+		background: none;
+		border: none;
+		color: #9a8b78;
+		cursor: pointer;
+		font-size: 0.8rem;
+		padding: 0 0.2rem;
+	}
+
+	.edit-close:hover {
+		color: #c9a84c;
+	}
+
+	.edit-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.25rem;
+	}
+
+	.edit-row label {
+		color: #9a8b78;
+	}
+
+	.edit-row input {
+		width: 70px;
+		background: #0f0b08;
+		border: 1px solid #3a2e24;
+		color: #d4c5a0;
+		padding: 0.2rem 0.3rem;
+		font-family: monospace;
+		font-size: 0.7rem;
+		text-align: right;
+	}
+
+	.edit-row input:focus {
+		outline: none;
+		border-color: #c9a84c;
 	}
 </style>
