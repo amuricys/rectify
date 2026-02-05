@@ -293,7 +293,7 @@ function get_inputs_for_system(world::WorldState, system_id::String)
         return Float64[]
     end
 
-    inputs = zeros(ninputs(sys.machine))
+    inputs = fill(NaN, ninputs(sys.machine))
 
     for wire in values(world.wires)
         if wire.to_system == system_id

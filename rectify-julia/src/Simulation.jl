@@ -194,8 +194,8 @@ function step_world_independent!(world, dt::Float64; method::Symbol=:rk4)
 
     # Step each system
     for (sys_id, sys) in world.systems
-        # Build inputs from wires
-        inputs = zeros(ninputs(sys.machine))
+        # Build inputs from wires (NaN for unconnected — expanded input convention)
+        inputs = fill(NaN, ninputs(sys.machine))
         for port in 1:ninputs(sys.machine)
             if haskey(wire_map, (sys_id, port))
                 from_id, from_port = wire_map[(sys_id, port)]

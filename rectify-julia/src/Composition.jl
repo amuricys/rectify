@@ -131,8 +131,10 @@ function compose_systems(
             sys_state = u[range]
 
             # Build inputs for this system from wires
-            inputs = zeros(ninputs(sys.machine))
-            for port in 1:ninputs(sys.machine)
+            # Use NaN for unconnected inputs (expanded input convention)
+            n_in = ninputs(sys.machine)
+            inputs = fill(NaN, n_in)
+            for port in 1:n_in
                 if haskey(wire_map, (sys_id, port))
                     from_id, from_port = wire_map[(sys_id, port)]
                     if haskey(outputs, from_id) && from_port <= length(outputs[from_id])

@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
 	import { algebraic } from '$lib/stores/algebraic.svelte';
+	import CustomSystemEditor from './CustomSystemEditor.svelte';
 
 	// Wiring state
 	let wireFrom = $state<string>('');
@@ -179,6 +180,8 @@
 		<span class="label">Time</span>
 		<code class="time-display">{algebraic.time.toFixed(3)}s</code>
 	</div>
+
+	<CustomSystemEditor />
 </div>
 
 <style>
@@ -214,12 +217,12 @@
 	}
 
 	.status.connected {
-		color: #6aaf8c;
+		color: #7a9b68;
 	}
 
 	.error {
 		font-size: 0.75rem;
-		color: #cd7a7a;
+		color: #b85c4a;
 	}
 
 	.button-row {
@@ -261,8 +264,8 @@
 	}
 
 	button.danger:hover {
-		border-color: #cd7a7a;
-		color: #cd7a7a;
+		border-color: var(--danger, #b85c4a);
+		color: var(--danger, #b85c4a);
 	}
 
 	.speed-control {
@@ -348,7 +351,7 @@
 	}
 
 	.state-name {
-		color: var(--text-muted, #888);
+		color: var(--text-muted, #6b5d4f);
 		font-weight: bold;
 	}
 

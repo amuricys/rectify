@@ -29,9 +29,9 @@
 	// Animation
 	let animationId: number;
 
-	const CITY_COLOR = 0x7ac5cd;
-	const CURRENT_TOUR_COLOR = 0xcdaa7a;
-	const BEST_TOUR_COLOR = 0x5a8a5a;
+	const CITY_COLOR = 0xc9a84c;
+	const CURRENT_TOUR_COLOR = 0xd4956b;
+	const BEST_TOUR_COLOR = 0x7a9b68;
 
 	function initScene() {
 		renderer = new THREE.WebGLRenderer({
@@ -41,7 +41,7 @@
 		});
 		renderer.setPixelRatio(window.devicePixelRatio);
 		renderer.setSize(width, height);
-		renderer.setClearColor(0x0a0a0f, 1);
+		renderer.setClearColor(0x0f0b08, 1);
 
 		scene = new THREE.Scene();
 
@@ -60,7 +60,7 @@
 		scene.add(pointLight);
 
 		// Grid for reference
-		const gridHelper = new THREE.GridHelper(400, 20, 0x1a1a2e, 0x1a1a2e);
+		const gridHelper = new THREE.GridHelper(400, 20, 0x3a2e24, 0x3a2e24);
 		gridHelper.rotation.x = Math.PI / 2;
 		scene.add(gridHelper);
 

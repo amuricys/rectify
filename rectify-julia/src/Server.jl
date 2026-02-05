@@ -12,11 +12,13 @@ include("Systems.jl")
 include("World.jl")
 include("Composition.jl")
 include("Simulation.jl")
+include("CustomSystems.jl")
 
 using .Systems
 using .World
 using .Composition
 using .Simulation
+using .CustomSystems
 
 export start_server
 
@@ -113,6 +115,9 @@ function handle_message!(state::ServerState, msg::Dict{String, Any})
 
     elseif msg_type == "GetWorldState"
         return serialize_world(world)
+
+    elseif msg_type == "DefineCustomSystem"
+        return handle_define_custom_system!(state, msg)
 
     else
         return Dict("type" => "Error", "code" => "UNKNOWN_MESSAGE", "message" => "Unknown message type: $msg_type")
@@ -291,6 +296,39 @@ function handle_control!(state::ServerState, msg::Dict{String, Any})
     end
 
     return Dict("type" => "Ack", "success" => true, "action" => action)
+end
+
+function handle_define_custom_system!(state::ServerState, msg::Dict{String, Any})
+    name = get(msg, "name", "")
+    state_vars = String.(get(msg, "stateVars", String[]))
+    equations = String.(get(msg, "equations", String[]))
+    params_raw = get(msg, "parameters", [])
+    inputs = String.(get(msg, "inputs", String[]))
+    initial_state = Float64.(get(msg, "initialState", Float64[]))
+
+    # Convert parameters to tuples
+    params = Tuple{String, Float64}[]
+    for p in params_raw
+        pname = String(get(p, "name", ""))
+        pdefault = Float64(get(p, "default", 1.0))
+        push!(params, (pname, pdefault))
+    end
+
+    try
+        success, message = validate_and_register_custom_system!(
+            name, state_vars, equations, params, inputs, initial_state
+        )
+
+        if success
+            # Broadcast updated template list to all clients
+            broadcast_to_clients(state, Dict("type" => "Templates", "templates" => list_templates()))
+            return Dict("type" => "Ack", "success" => true, "action" => "DefineCustomSystem", "message" => message)
+        else
+            return Dict("type" => "Error", "code" => "CUSTOM_SYSTEM_FAILED", "message" => message)
+        end
+    catch e
+        return Dict("type" => "Error", "code" => "CUSTOM_SYSTEM_ERROR", "message" => string(e))
+    end
 end
 
 # =============================================================================

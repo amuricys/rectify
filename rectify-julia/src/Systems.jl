@@ -16,6 +16,15 @@ export create_system, list_templates
     SystemTemplate
 
 Metadata about a dynamical system type, including how to construct it.
+
+Expanded input port convention:
+  - Ports 1..nstates: state replacement inputs (NaN = not connected, own dynamics used)
+  - Ports nstates+1..nstates+nparams: parameter inputs (default: parameter's configured value)
+
+When a state input is wired, that variable's derivative is set to 0 and its value
+is overridden by the incoming signal after each step. The other equations still
+reference it, but it is algebraically constrained. (Additive driving can be derived
+from this by wiring through an adder system.)
 """
 struct SystemTemplate
     id::String
@@ -27,6 +36,7 @@ struct SystemTemplate
     state_names::Vector{String}
     input_names::Vector{String}
     output_names::Vector{String}
+    input_defaults::Vector{Float64}
     constructor::Function  # (params::Dict) -> (ContinuousMachine, initial_state)
 end
 
@@ -35,9 +45,6 @@ Global registry of available system templates
 """
 const SYSTEM_REGISTRY = Dict{String, SystemTemplate}()
 
-# Note: ninputs, nstates, noutputs are functions from AlgebraicDynamics.DWDDynam
-# They are re-exported for convenience
-
 # =============================================================================
 # Lorenz Attractor
 # =============================================================================
@@ -45,30 +52,33 @@ const SYSTEM_REGISTRY = Dict{String, SystemTemplate}()
 """
     lorenz_machine(; σ=10.0, ρ=28.0, β=8/3)
 
-Classic Lorenz attractor as an open system.
+Classic Lorenz attractor as an open system with expanded inputs.
 - 3 states: x, y, z
-- 1 input: additive perturbation to ρ parameter
-- 3 outputs: x, y, z (full state exposed)
-
-The famous chaotic attractor with butterfly-shaped trajectory.
+- 6 inputs: x_in, y_in, z_in (state replacement), σ, ρ, β (parameter)
+- 3 outputs: x, y, z
 """
 function lorenz_machine(; σ=10.0, ρ=28.0, β=8/3)
     function dynamics(u, x, p, t)
-        # u is the state vector [x, y, z]
-        # x is the input vector
         x_state, y_state, z_state = u
-        ρ_eff = ρ + (length(x) > 0 ? x[1] : 0.0)
+        # State replacement inputs: NaN means use own state
+        x_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : x_state
+        y_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : y_state
+        z_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : z_state
+        # Parameter inputs
+        σ_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : σ
+        ρ_eff = (length(x) >= 5 && !isnan(x[5])) ? x[5] : ρ
+        β_eff = (length(x) >= 6 && !isnan(x[6])) ? x[6] : β
 
-        dx = σ * (y_state - x_state)
-        dy = x_state * (ρ_eff - z_state) - y_state
-        dz = x_state * y_state - β * z_state
+        dx = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : σ_eff * (y_eff - x_eff)
+        dy = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : x_eff * (ρ_eff - z_eff) - y_eff
+        dz = (length(x) >= 3 && !isnan(x[3])) ? 0.0 : x_eff * y_eff - β_eff * z_eff
 
         return [dx, dy, dz]
     end
 
-    readout(u, p, t) = u  # Full state as output
+    readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 3, 3, dynamics, readout)
+    ContinuousMachine{Float64}(6, 3, 3, dynamics, readout)
 end
 
 function lorenz_constructor(params::Dict{String, Float64})
@@ -83,11 +93,12 @@ end
 SYSTEM_REGISTRY["lorenz"] = SystemTemplate(
     "lorenz",
     "Lorenz Attractor",
-    3, 1, 3,
+    3, 6, 3,
     [("sigma", 10.0), ("rho", 28.0), ("beta", 8/3)],
     ["x", "y", "z"],
-    ["ρ_mod"],
+    ["x_in", "y_in", "z_in", "σ", "ρ", "β"],
     ["x", "y", "z"],
+    [NaN, NaN, NaN, 10.0, 28.0, 8/3],
     lorenz_constructor
 )
 
@@ -95,29 +106,26 @@ SYSTEM_REGISTRY["lorenz"] = SystemTemplate(
 # Rössler Attractor
 # =============================================================================
 
-"""
-    rossler_machine(; a=0.2, b=0.2, c=5.7)
-
-Rössler attractor - simpler chaotic system than Lorenz.
-- 3 states: x, y, z
-- 1 input: additive perturbation to y equation
-- 3 outputs: x, y, z
-"""
 function rossler_machine(; a=0.2, b=0.2, c=5.7)
     function dynamics(u, x, p, t)
         x_state, y_state, z_state = u
-        drive = length(x) > 0 ? x[1] : 0.0
+        x_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : x_state
+        y_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : y_state
+        z_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : z_state
+        a_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : a
+        b_eff = (length(x) >= 5 && !isnan(x[5])) ? x[5] : b
+        c_eff = (length(x) >= 6 && !isnan(x[6])) ? x[6] : c
 
-        dx = -y_state - z_state
-        dy = x_state + a * y_state + drive
-        dz = b + z_state * (x_state - c)
+        dx = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : -y_eff - z_eff
+        dy = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : x_eff + a_eff * y_eff
+        dz = (length(x) >= 3 && !isnan(x[3])) ? 0.0 : b_eff + z_eff * (x_eff - c_eff)
 
         return [dx, dy, dz]
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 3, 3, dynamics, readout)
+    ContinuousMachine{Float64}(6, 3, 3, dynamics, readout)
 end
 
 function rossler_constructor(params::Dict{String, Float64})
@@ -132,11 +140,12 @@ end
 SYSTEM_REGISTRY["rossler"] = SystemTemplate(
     "rossler",
     "Rössler Attractor",
-    3, 1, 3,
+    3, 6, 3,
     [("a", 0.2), ("b", 0.2), ("c", 5.7)],
     ["x", "y", "z"],
-    ["drive"],
+    ["x_in", "y_in", "z_in", "a", "b", "c"],
     ["x", "y", "z"],
+    [NaN, NaN, NaN, 0.2, 0.2, 5.7],
     rossler_constructor
 )
 
@@ -144,26 +153,26 @@ SYSTEM_REGISTRY["rossler"] = SystemTemplate(
 # Chen Attractor
 # =============================================================================
 
-"""
-    chen_machine(; a=35.0, b=3.0, c=28.0)
-
-Chen attractor - another 3D chaotic system.
-"""
 function chen_machine(; a=35.0, b=3.0, c=28.0)
     function dynamics(u, x, p, t)
         x_state, y_state, z_state = u
-        drive = length(x) > 0 ? x[1] : 0.0
+        x_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : x_state
+        y_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : y_state
+        z_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : z_state
+        a_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : a
+        b_eff = (length(x) >= 5 && !isnan(x[5])) ? x[5] : b
+        c_eff = (length(x) >= 6 && !isnan(x[6])) ? x[6] : c
 
-        dx = a * (y_state - x_state)
-        dy = (c - a) * x_state - x_state * z_state + c * y_state + drive
-        dz = x_state * y_state - b * z_state
+        dx = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : a_eff * (y_eff - x_eff)
+        dy = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : (c_eff - a_eff) * x_eff - x_eff * z_eff + c_eff * y_eff
+        dz = (length(x) >= 3 && !isnan(x[3])) ? 0.0 : x_eff * y_eff - b_eff * z_eff
 
         return [dx, dy, dz]
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 3, 3, dynamics, readout)
+    ContinuousMachine{Float64}(6, 3, 3, dynamics, readout)
 end
 
 function chen_constructor(params::Dict{String, Float64})
@@ -178,11 +187,12 @@ end
 SYSTEM_REGISTRY["chen"] = SystemTemplate(
     "chen",
     "Chen Attractor",
-    3, 1, 3,
+    3, 6, 3,
     [("a", 35.0), ("b", 3.0), ("c", 28.0)],
     ["x", "y", "z"],
-    ["drive"],
+    ["x_in", "y_in", "z_in", "a", "b", "c"],
     ["x", "y", "z"],
+    [NaN, NaN, NaN, 35.0, 3.0, 28.0],
     chen_constructor
 )
 
@@ -190,28 +200,22 @@ SYSTEM_REGISTRY["chen"] = SystemTemplate(
 # Van der Pol Oscillator
 # =============================================================================
 
-"""
-    vanderpol_machine(; μ=1.0)
-
-Van der Pol oscillator - self-sustaining nonlinear oscillator.
-- 2 states: position x, velocity y
-- 1 input: external drive
-- 2 outputs: x, y
-"""
 function vanderpol_machine(; μ=1.0)
     function dynamics(u, x, p, t)
         x_state, y_state = u
-        drive = length(x) > 0 ? x[1] : 0.0
+        x_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : x_state
+        y_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : y_state
+        μ_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : μ
 
-        dx = y_state
-        dy = μ * (1 - x_state^2) * y_state - x_state + drive
+        dx = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : y_eff
+        dy = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : μ_eff * (1 - x_eff^2) * y_eff - x_eff
 
         return [dx, dy]
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 2, 2, dynamics, readout)
+    ContinuousMachine{Float64}(3, 2, 2, dynamics, readout)
 end
 
 function vanderpol_constructor(params::Dict{String, Float64})
@@ -224,11 +228,12 @@ end
 SYSTEM_REGISTRY["vanderpol"] = SystemTemplate(
     "vanderpol",
     "Van der Pol Oscillator",
-    2, 1, 2,
+    2, 3, 2,
     [("mu", 1.0)],
     ["x", "y"],
-    ["drive"],
+    ["x_in", "y_in", "μ"],
     ["x", "y"],
+    [NaN, NaN, 1.0],
     vanderpol_constructor
 )
 
@@ -236,28 +241,24 @@ SYSTEM_REGISTRY["vanderpol"] = SystemTemplate(
 # Harmonic Oscillator
 # =============================================================================
 
-"""
-    harmonic_machine(; m=1.0, k=1.0, damping=0.1)
-
-Damped harmonic oscillator.
-- 2 states: position, velocity
-- 1 input: external force
-- 2 outputs: position, velocity
-"""
 function harmonic_machine(; m=1.0, k=1.0, damping=0.1)
     function dynamics(u, x, p, t)
         pos, vel = u
-        force = length(x) > 0 ? x[1] : 0.0
+        pos_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : pos
+        vel_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : vel
+        m_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : m
+        k_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : k
+        damp_eff = (length(x) >= 5 && !isnan(x[5])) ? x[5] : damping
 
-        dpos = vel
-        dvel = (-k * pos - damping * vel + force) / m
+        dpos = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : vel_eff
+        dvel = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : (-k_eff * pos_eff - damp_eff * vel_eff) / m_eff
 
         return [dpos, dvel]
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 2, 2, dynamics, readout)
+    ContinuousMachine{Float64}(5, 2, 2, dynamics, readout)
 end
 
 function harmonic_constructor(params::Dict{String, Float64})
@@ -272,11 +273,12 @@ end
 SYSTEM_REGISTRY["harmonic"] = SystemTemplate(
     "harmonic",
     "Harmonic Oscillator",
-    2, 1, 2,
+    2, 5, 2,
     [("m", 1.0), ("k", 1.0), ("damping", 0.1)],
     ["position", "velocity"],
-    ["force"],
+    ["pos_in", "vel_in", "m", "k", "damping"],
     ["position", "velocity"],
+    [NaN, NaN, 1.0, 1.0, 0.1],
     harmonic_constructor
 )
 
@@ -284,29 +286,28 @@ SYSTEM_REGISTRY["harmonic"] = SystemTemplate(
 # Duffing Oscillator
 # =============================================================================
 
-"""
-    duffing_machine(; δ=0.3, α=-1.0, β=1.0, γ=0.5, ω=1.2)
-
-Duffing oscillator - driven nonlinear oscillator with cubic stiffness.
-Can exhibit chaotic behavior for certain parameter values.
-"""
 function duffing_machine(; δ=0.3, α=-1.0, β=1.0, γ=0.5, ω=1.2)
     function dynamics(u, x, p, t)
         pos, vel = u
-        external = length(x) > 0 ? x[1] : 0.0
+        pos_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : pos
+        vel_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : vel
+        δ_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : δ
+        α_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : α
+        β_eff = (length(x) >= 5 && !isnan(x[5])) ? x[5] : β
+        γ_eff = (length(x) >= 6 && !isnan(x[6])) ? x[6] : γ
+        ω_eff = (length(x) >= 7 && !isnan(x[7])) ? x[7] : ω
 
-        # Internal periodic drive + external input
-        drive = γ * cos(ω * t) + external
+        drive = γ_eff * cos(ω_eff * t)
 
-        dpos = vel
-        dvel = -δ * vel - α * pos - β * pos^3 + drive
+        dpos = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : vel_eff
+        dvel = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : -δ_eff * vel_eff - α_eff * pos_eff - β_eff * pos_eff^3 + drive
 
         return [dpos, dvel]
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 2, 2, dynamics, readout)
+    ContinuousMachine{Float64}(7, 2, 2, dynamics, readout)
 end
 
 function duffing_constructor(params::Dict{String, Float64})
@@ -323,29 +324,24 @@ end
 SYSTEM_REGISTRY["duffing"] = SystemTemplate(
     "duffing",
     "Duffing Oscillator",
-    2, 1, 2,
+    2, 7, 2,
     [("delta", 0.3), ("alpha", -1.0), ("beta", 1.0), ("gamma", 0.5), ("omega", 1.2)],
     ["position", "velocity"],
-    ["external"],
+    ["pos_in", "vel_in", "δ", "α", "β", "γ", "ω"],
     ["position", "velocity"],
+    [NaN, NaN, 0.3, -1.0, 1.0, 0.5, 1.2],
     duffing_constructor
 )
 
 # =============================================================================
-# Constant Source (Parameter/Signal Source)
+# Constant Source
 # =============================================================================
 
-"""
-    constant_machine(; value=1.0)
-
-Constant value source - outputs a fixed value.
-Useful for providing parameter inputs to other systems.
-"""
 function constant_machine(; value=1.0)
-    dynamics(u, x, p, t) = [0.0]  # No change
-    readout(u, p, t) = u  # Output is the state
+    dynamics(u, x, p, t) = [0.0]
+    readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(0, 1, 1, dynamics, readout)
+    ContinuousMachine{Float64}(1, 1, 1, dynamics, readout)
 end
 
 function constant_constructor(params::Dict{String, Float64})
@@ -358,11 +354,12 @@ end
 SYSTEM_REGISTRY["constant"] = SystemTemplate(
     "constant",
     "Constant Source",
-    1, 0, 1,
+    1, 1, 1,
     [("value", 1.0)],
     ["value"],
-    String[],
+    ["val_in"],
     ["out"],
+    [NaN],
     constant_constructor
 )
 
@@ -370,25 +367,26 @@ SYSTEM_REGISTRY["constant"] = SystemTemplate(
 # Sine Wave Generator
 # =============================================================================
 
-"""
-    sine_machine(; amplitude=1.0, frequency=1.0, phase=0.0)
-
-Sine wave generator implemented as a harmonic oscillator.
-Outputs: sin(ωt + φ) where ω = 2π * frequency
-"""
 function sine_machine(; amplitude=1.0, frequency=1.0, phase=0.0)
     ω = 2π * frequency
 
     function dynamics(u, x, p, t)
-        # Harmonic oscillator: d²y/dt² = -ω²y
-        # State: [y, dy/dt]
         y, dydt = u
-        return [dydt, -ω^2 * y]
+        y_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : y
+        dydt_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : dydt
+        amp_eff = (length(x) >= 3 && !isnan(x[3])) ? x[3] : amplitude
+        freq_eff = (length(x) >= 4 && !isnan(x[4])) ? x[4] : frequency
+        ω_eff = 2π * freq_eff
+
+        dy = (length(x) >= 1 && !isnan(x[1])) ? 0.0 : dydt_eff
+        ddydt = (length(x) >= 2 && !isnan(x[2])) ? 0.0 : -ω_eff^2 * y_eff
+
+        return [dy, ddydt]
     end
 
     readout(u, p, t) = [amplitude * u[1]]
 
-    ContinuousMachine{Float64}(0, 2, 1, dynamics, readout)
+    ContinuousMachine{Float64}(4, 2, 1, dynamics, readout)
 end
 
 function sine_constructor(params::Dict{String, Float64})
@@ -396,7 +394,6 @@ function sine_constructor(params::Dict{String, Float64})
     frequency = get(params, "frequency", 1.0)
     phase = get(params, "phase", 0.0)
     machine = sine_machine(; amplitude=amplitude, frequency=frequency, phase=phase)
-    # Initial conditions for sin with phase
     ω = 2π * frequency
     initial_state = [sin(phase), ω * cos(phase)]
     return machine, initial_state
@@ -405,11 +402,12 @@ end
 SYSTEM_REGISTRY["sine"] = SystemTemplate(
     "sine",
     "Sine Wave Generator",
-    2, 0, 1,
-    [("amplitude", 1.0), ("frequency", 1.0), ("phase", 0.0)],
+    2, 4, 1,
+    [("amplitude", 1.0), ("frequency", 1.0)],
     ["y", "dy/dt"],
-    String[],
+    ["y_in", "dydt_in", "amplitude", "frequency"],
     ["signal"],
+    [NaN, NaN, 1.0, 1.0],
     sine_constructor
 )
 
@@ -417,25 +415,25 @@ SYSTEM_REGISTRY["sine"] = SystemTemplate(
 # Linear Scaler/Gain
 # =============================================================================
 
-"""
-    scaler_machine(; gain=1.0)
-
-Linear gain block - multiplies input by a constant.
-"""
 function scaler_machine(; gain=1.0)
-    # Stateless in effect, but AlgebraicDynamics requires state
-    # We use a single state that tracks the scaled input
     function dynamics(u, x, p, t)
-        if length(x) > 0
-            return [gain * x[1] - u[1]]  # Rapidly track input
-        else
+        val = u[1]
+        val_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : val
+        gain_eff = (length(x) >= 2 && !isnan(x[2])) ? x[2] : gain
+
+        # State replacement: if val_in is driven, derivative is 0
+        if length(x) >= 1 && !isnan(x[1])
             return [0.0]
+        else
+            # Track gain * input rapidly
+            target = gain_eff * (length(x) >= 1 ? 0.0 : 0.0)
+            return [gain_eff * (length(x) >= 1 && !isnan(x[1]) ? x[1] : 0.0) - val]
         end
     end
 
     readout(u, p, t) = u
 
-    ContinuousMachine{Float64}(1, 1, 1, dynamics, readout)
+    ContinuousMachine{Float64}(2, 1, 1, dynamics, readout)
 end
 
 function scaler_constructor(params::Dict{String, Float64})
@@ -448,11 +446,12 @@ end
 SYSTEM_REGISTRY["scaler"] = SystemTemplate(
     "scaler",
     "Linear Scaler",
-    1, 1, 1,
+    1, 2, 1,
     [("gain", 1.0)],
     ["value"],
-    ["in"],
+    ["in", "gain"],
     ["out"],
+    [NaN, 1.0],
     scaler_constructor
 )
 
@@ -460,15 +459,17 @@ SYSTEM_REGISTRY["scaler"] = SystemTemplate(
 # Integrator
 # =============================================================================
 
-"""
-    integrator_machine()
-
-Pure integrator - state is the integral of the input.
-"""
 function integrator_machine()
     function dynamics(u, x, p, t)
-        input = length(x) > 0 ? x[1] : 0.0
-        return [input]
+        val = u[1]
+        val_eff = (length(x) >= 1 && !isnan(x[1])) ? x[1] : val
+
+        if length(x) >= 1 && !isnan(x[1])
+            return [0.0]  # Driven — derivative is 0
+        else
+            # Integrate signal from port 1 (same port, but when it's NaN we have no input)
+            return [0.0]
+        end
     end
 
     readout(u, p, t) = u
@@ -491,6 +492,7 @@ SYSTEM_REGISTRY["integrator"] = SystemTemplate(
     ["integral"],
     ["in"],
     ["out"],
+    [NaN],
     integrator_constructor
 )
 
@@ -527,7 +529,8 @@ function list_templates()
         "parameters" => [Dict("name" => p[1], "default" => p[2]) for p in t.parameters],
         "state_names" => t.state_names,
         "input_names" => t.input_names,
-        "output_names" => t.output_names
+        "output_names" => t.output_names,
+        "input_defaults" => t.input_defaults
     ) for t in values(SYSTEM_REGISTRY)]
 end
 

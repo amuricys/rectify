@@ -111,7 +111,7 @@
 	}
 
 	.status.connected {
-		color: #6aaf8c;
+		color: #7a9b68;
 	}
 
 	.button-row {
@@ -135,7 +135,7 @@
 	}
 
 	.stat-row.highlight {
-		background: rgba(106, 175, 140, 0.1);
+		background: rgba(122, 155, 104, 0.1);
 		padding: 0.25rem;
 		margin: 0 -0.25rem;
 		border-radius: 2px;
@@ -151,11 +151,11 @@
 	}
 
 	.stat-value.temp {
-		color: #cd7a7a;
+		color: #b85c4a;
 	}
 
 	.stat-value.best {
-		color: #6aaf8c;
+		color: #7a9b68;
 		font-weight: bold;
 	}
 
@@ -169,8 +169,8 @@
 	}
 
 	.toggle.running {
-		background: rgba(106, 175, 140, 0.2);
-		border-color: #6aaf8c;
+		background: rgba(122, 155, 104, 0.2);
+		border-color: #7a9b68;
 	}
 
 	.seed-row {

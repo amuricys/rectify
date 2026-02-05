@@ -43,7 +43,7 @@
 		width: 100%;
 		height: 100%;
 		overflow: hidden;
-		background: #000;
+		background: #0f0b08;
 		border: 1px solid var(--border);
 	}
 </style>

@@ -13,6 +13,7 @@ export interface SystemTemplate {
 	state_names: string[];
 	input_names: string[];
 	output_names: string[];
+	input_defaults: number[];
 }
 
 export interface SystemState {
@@ -95,6 +96,8 @@ function createAlgebraicStore() {
 
 	// Use circular buffers for history - much more efficient than array spread/slice
 	const historyBuffers = new Map<string, CircularBuffer<number[]>>();
+	// Time buffers parallel to history — real simulation timestamps
+	const timeBuffers = new Map<string, CircularBuffer<number>>();
 	// Track version to trigger reactivity when history updates
 	let historyVersion = $state(0);
 
@@ -132,12 +135,16 @@ function createAlgebraicStore() {
 						const buffer = new CircularBuffer<number[]>(historyLength);
 						buffer.push([...sys.state]);
 						historyBuffers.set(sys.id, buffer);
+						const tbuf = new CircularBuffer<number>(historyLength);
+						tbuf.push(data.time);
+						timeBuffers.set(sys.id, tbuf);
 					}
 				}
 				// Clean up removed systems
 				for (const id of historyBuffers.keys()) {
 					if (!currentIds.has(id)) {
 						historyBuffers.delete(id);
+						timeBuffers.delete(id);
 					}
 				}
 				historyVersion++;
@@ -164,6 +171,10 @@ function createAlgebraicStore() {
 					const buffer = historyBuffers.get(id);
 					if (buffer) {
 						buffer.push([...state]);
+					}
+					const tbuf = timeBuffers.get(id);
+					if (tbuf) {
+						tbuf.push(data.time);
 					}
 				}
 				historyVersion++;
@@ -273,6 +284,12 @@ function createAlgebraicStore() {
 			return buffer ? buffer.toArray() : [];
 		},
 
+		getTimeHistory(systemId: string): number[] {
+			const _ = historyVersion;
+			const buffer = timeBuffers.get(systemId);
+			return buffer ? buffer.toArray() : [];
+		},
+
 		// Actions
 		connect,
 		disconnect,
@@ -341,6 +358,9 @@ function createAlgebraicStore() {
 			for (const buffer of historyBuffers.values()) {
 				buffer.clear();
 			}
+			for (const buffer of timeBuffers.values()) {
+				buffer.clear();
+			}
 			historyVersion++;
 			send({ type: 'Control', action: 'reset' });
 		},
@@ -348,6 +368,25 @@ function createAlgebraicStore() {
 		setSpeed(newSpeed: number) {
 			speed = newSpeed;
 			send({ type: 'Control', action: 'setSpeed', speed: newSpeed });
+		},
+
+		defineCustomSystem(parsed: {
+			name: string;
+			stateVars: string[];
+			equations: string[];
+			parameters: { name: string; default: number }[];
+			inputs: string[];
+			initialState: number[];
+		}) {
+			send({
+				type: 'DefineCustomSystem',
+				name: parsed.name,
+				stateVars: parsed.stateVars,
+				equations: parsed.equations,
+				parameters: parsed.parameters,
+				inputs: parsed.inputs,
+				initialState: parsed.initialState
+			});
 		}
 	};
 }
