@@ -42,8 +42,27 @@ export interface WorldState {
 	time: number;
 	running: boolean;
 	speed: number;
+	dt: number;
 	systems: SystemState[];
 	wires: WireState[];
+}
+
+export interface CompositeGroup {
+	id: string;
+	name: string;
+	memberSystemIds: string[];
+	internalWireIds: string[];
+	position: { x: number; y: number };
+	minimized: boolean;
+	lookInside: boolean;
+}
+
+// Describes a free (unconstrained) state variable in a composite
+export interface FreeStateInfo {
+	systemId: string;
+	stateIndex: number;        // 0-based index within the member system
+	globalIndex: number;       // 0-based index in the concatenated state vector
+	name: string;              // e.g. "Lorenz.x"
 }
 
 // Circular buffer for efficient history management
@@ -87,9 +106,12 @@ class CircularBuffer<T> {
 function createAlgebraicStore() {
 	let status = $state<ConnectionStatus>('disconnected');
 	let error = $state<string | null>(null);
+	let errorCode = $state<string | null>(null);
+	let recoverAction = $state<string | null>(null);
 	let time = $state(0);
 	let running = $state(false);
 	let speed = $state(1);
+	let dt = $state(0.001);
 	let systemList = $state<SystemState[]>([]);
 	let wireList = $state<WireState[]>([]);
 	let templateList = $state<SystemTemplate[]>([]);
@@ -101,6 +123,9 @@ function createAlgebraicStore() {
 	// Track version to trigger reactivity when history updates
 	let historyVersion = $state(0);
 
+	// Composite groups: connected components of wired systems
+	let compositeGroups = $state<CompositeGroup[]>([]);
+
 	const historyLength = 2000;
 	let ws: WebSocket | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,6 +135,119 @@ function createAlgebraicStore() {
 		if (ws?.readyState === WebSocket.OPEN) {
 			ws.send(JSON.stringify(msg));
 		}
+	}
+
+	function recomputeComposites() {
+		// Union-find on systems connected by wires
+		const parent = new Map<string, string>();
+		const find = (x: string): string => {
+			if (!parent.has(x)) parent.set(x, x);
+			let root = x;
+			while (parent.get(root) !== root) root = parent.get(root)!;
+			// Path compression
+			let cur = x;
+			while (cur !== root) {
+				const next = parent.get(cur)!;
+				parent.set(cur, root);
+				cur = next;
+			}
+			return root;
+		};
+		const union = (a: string, b: string) => {
+			const ra = find(a);
+			const rb = find(b);
+			if (ra !== rb) parent.set(ra, rb);
+		};
+
+		// Initialize all systems
+		for (const sys of systemList) {
+			find(sys.id);
+		}
+		// Union systems connected by wires
+		for (const wire of wireList) {
+			union(wire.fromSystem, wire.toSystem);
+		}
+
+		// Group by root
+		const components = new Map<string, string[]>();
+		for (const sys of systemList) {
+			const root = find(sys.id);
+			if (!components.has(root)) components.set(root, []);
+			components.get(root)!.push(sys.id);
+		}
+
+		// Build new composite groups (only for components with 2+ members)
+		const oldGroupMap = new Map<string, CompositeGroup>();
+		for (const g of compositeGroups) {
+			// Key by sorted member IDs to match against
+			const key = [...g.memberSystemIds].sort().join(',');
+			oldGroupMap.set(key, g);
+		}
+
+		const newGroups: CompositeGroup[] = [];
+		for (const [, members] of components) {
+			if (members.length < 2) continue;
+			const sorted = [...members].sort();
+			const key = sorted.join(',');
+
+			// Find internal wires
+			const memberSet = new Set(sorted);
+			const internalWires = wireList
+				.filter(w => memberSet.has(w.fromSystem) && memberSet.has(w.toSystem))
+				.map(w => w.id);
+
+			// Check for existing group with same or overlapping membership
+			// Build name from template names (always recompute to reflect membership)
+			const name = sorted.map(id => {
+				const sys = systemList.find(s => s.id === id);
+				return sys ? sys.templateId.split('_')[0] : id;
+			}).join(' \u2297 ');
+
+			const existing = oldGroupMap.get(key);
+			if (existing) {
+				// Same membership — keep position, minimized, lookInside; update name & wires
+				newGroups.push({
+					...existing,
+					name,
+					memberSystemIds: sorted,
+					internalWireIds: internalWires
+				});
+				oldGroupMap.delete(key);
+			} else {
+				// Try to find a group that overlaps (expanded/shrunk)
+				let found: CompositeGroup | null = null;
+				for (const [oldKey, oldGroup] of oldGroupMap) {
+					const oldMembers = new Set(oldGroup.memberSystemIds);
+					const overlap = sorted.filter(id => oldMembers.has(id));
+					if (overlap.length > 0) {
+						found = oldGroup;
+						oldGroupMap.delete(oldKey);
+						break;
+					}
+				}
+
+				// Compute centroid from system positions
+				let cx = 0, cy = 0;
+				for (const id of sorted) {
+					const sys = systemList.find(s => s.id === id);
+					if (sys) { cx += sys.position.x; cy += sys.position.y; }
+				}
+				cx /= sorted.length;
+				cy /= sorted.length;
+
+				newGroups.push({
+					id: found?.id ?? `composite_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+					name,
+					memberSystemIds: sorted,
+					internalWireIds: internalWires,
+					position: found?.position ?? { x: cx, y: cy },
+					minimized: found?.minimized ?? false,
+					lookInside: found?.lookInside ?? false
+				});
+			}
+		}
+
+		compositeGroups = newGroups;
 	}
 
 	function handleMessage(data: any) {
@@ -125,6 +263,7 @@ function createAlgebraicStore() {
 				time = data.time;
 				running = data.running;
 				speed = data.speed;
+				dt = typeof data.dt === 'number' ? data.dt : dt;
 				systemList = [...data.systems];
 				wireList = [...data.wires];
 
@@ -148,6 +287,7 @@ function createAlgebraicStore() {
 					}
 				}
 				historyVersion++;
+				recomputeComposites();
 				console.log('WorldState updated:', systemList.length, 'systems');
 				break;
 
@@ -191,14 +331,25 @@ function createAlgebraicStore() {
 				break;
 
 			case 'Ack':
+				errorCode = null;
+				recoverAction = null;
 				if (!data.success) {
 					console.error('Command failed:', data);
 				}
+				recomputeComposites();
 				break;
 
 			case 'Error':
 				console.error('Server error:', data.code, data.message);
-				error = data.message;
+				errorCode = data.code || null;
+				recoverAction = data.recoverAction || null;
+				if (data.code === 'NON_FINITE_STATE') {
+					const stage = data.stage ? ` stage=${data.stage}` : '';
+					const systemId = data.systemId ? ` system=${data.systemId}` : '';
+					error = `${data.message}${stage}${systemId}`;
+				} else {
+					error = data.message;
+				}
 				break;
 		}
 	}
@@ -218,6 +369,8 @@ function createAlgebraicStore() {
 
 		status = 'connecting';
 		error = null;
+		errorCode = null;
+		recoverAction = null;
 
 		try {
 			ws = new WebSocket(url);
@@ -266,9 +419,12 @@ function createAlgebraicStore() {
 		// Getters for reactive state
 		get status() { return status; },
 		get error() { return error; },
+		get errorCode() { return errorCode; },
+		get recoverAction() { return recoverAction; },
 		get time() { return time; },
 		get running() { return running; },
 		get speed() { return speed; },
+		get dt() { return dt; },
 		get systemList() { return systemList; },
 		get wireList() { return wireList; },
 		get templateList() { return templateList; },
@@ -276,6 +432,101 @@ function createAlgebraicStore() {
 		// For compatibility with Map-based access
 		get systems() { return new Map(systemList.map(s => [s.id, s])); },
 		get wires() { return new Map(wireList.map(w => [w.id, w])); },
+
+		// Composite groups
+		get compositeGroups() { return compositeGroups; },
+
+		getCompositeForSystem(systemId: string): CompositeGroup | null {
+			return compositeGroups.find(g => g.memberSystemIds.includes(systemId)) ?? null;
+		},
+
+		// Get info about free (unconstrained) states in a composite.
+		// A state is constrained if an internal wire targets its state input port (port <= nstates).
+		getCompositeFreeStateInfo(compositeId: string): FreeStateInfo[] {
+			const group = compositeGroups.find(g => g.id === compositeId);
+			if (!group) return [];
+
+			// Build set of constrained (systemId, stateIndex 0-based) pairs
+			const constrained = new Set<string>();
+			const memberSet = new Set(group.memberSystemIds);
+			for (const wire of wireList) {
+				if (memberSet.has(wire.fromSystem) && memberSet.has(wire.toSystem)) {
+					const targetSys = systemList.find(s => s.id === wire.toSystem);
+					if (targetSys && wire.toPort <= targetSys.nstates) {
+						constrained.add(`${wire.toSystem}:${wire.toPort - 1}`); // 0-based
+					}
+				}
+			}
+
+			const result: FreeStateInfo[] = [];
+			let globalIdx = 0;
+			for (const memberId of group.memberSystemIds) {
+				const sys = systemList.find(s => s.id === memberId);
+				if (!sys) continue;
+				const tmpl = templateList.find(t => t.id === sys.templateId);
+				const sysName = sys.templateId.split('_')[0];
+				const stateNames = tmpl?.state_names ?? [];
+				for (let i = 0; i < sys.nstates; i++) {
+					if (!constrained.has(`${memberId}:${i}`)) {
+						result.push({
+							systemId: memberId,
+							stateIndex: i,
+							globalIndex: globalIdx,
+							name: `${sysName}.${stateNames[i] || `v${i}`}`
+						});
+					}
+					globalIdx++;
+				}
+			}
+			return result;
+		},
+
+		// Returns history with only free (unconstrained) state columns
+		getCompositeHistory(compositeId: string): number[][] {
+			const _ = historyVersion;
+			const group = compositeGroups.find(g => g.id === compositeId);
+			if (!group) return [];
+
+			const freeStates = this.getCompositeFreeStateInfo(compositeId);
+			if (freeStates.length === 0) return [];
+
+			// Get the shortest history length among members
+			let minLen = Infinity;
+			const memberHistories = new Map<string, number[][]>();
+			for (const memberId of group.memberSystemIds) {
+				const buf = historyBuffers.get(memberId);
+				const hist = buf ? buf.toArray() : [];
+				memberHistories.set(memberId, hist);
+				minLen = Math.min(minLen, hist.length);
+			}
+			if (minLen === 0 || !Number.isFinite(minLen)) return [];
+
+			// Build combined array with only free states
+			const combined: number[][] = [];
+			for (let t = 0; t < minLen; t++) {
+				const row: number[] = [];
+				for (const fs of freeStates) {
+					const hist = memberHistories.get(fs.systemId);
+					if (hist) {
+						row.push(hist[t][fs.stateIndex] ?? 0);
+					}
+				}
+				combined.push(row);
+			}
+			return combined;
+		},
+
+		getCompositeTimeHistory(compositeId: string): number[] {
+			const _ = historyVersion;
+			const group = compositeGroups.find(g => g.id === compositeId);
+			if (!group || group.memberSystemIds.length === 0) return [];
+			const buf = timeBuffers.get(group.memberSystemIds[0]);
+			return buf ? buf.toArray() : [];
+		},
+
+		isInternalWire(wireId: string): boolean {
+			return compositeGroups.some(g => g.internalWireIds.includes(wireId));
+		},
 
 		getHistory(systemId: string): number[][] {
 			// Read historyVersion to create reactive dependency
@@ -368,6 +619,15 @@ function createAlgebraicStore() {
 		setSpeed(newSpeed: number) {
 			speed = newSpeed;
 			send({ type: 'Control', action: 'setSpeed', speed: newSpeed });
+		},
+
+		setDt(newDt: number) {
+			dt = newDt;
+			send({ type: 'Control', action: 'setDt', dt: newDt });
+		},
+
+		resumeFinite() {
+			send({ type: 'Control', action: 'resumeFinite' });
 		},
 
 		defineCustomSystem(parsed: {

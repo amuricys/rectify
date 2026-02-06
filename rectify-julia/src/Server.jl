@@ -29,6 +29,8 @@ export start_server
 mutable struct ServerState
     world::WorldState
     composed::Union{Nothing, ComposedSystemInfo}
+    step_dt::Float64
+    last_finite_states::Dict{String, Vector{Float64}}
     clients::Vector{HTTP.WebSockets.WebSocket}
     lock::ReentrantLock
 end
@@ -37,9 +39,51 @@ function ServerState()
     ServerState(
         WorldState(),
         nothing,
+        0.001,
+        Dict{String, Vector{Float64}}(),
         HTTP.WebSockets.WebSocket[],
         ReentrantLock()
     )
+end
+
+all_finite(v::Vector{Float64}) = all(isfinite, v)
+
+function snapshot_finite_states!(state::ServerState)
+    world_ids = Set(keys(state.world.systems))
+    for (sys_id, sys) in state.world.systems
+        if all_finite(sys.state)
+            state.last_finite_states[sys_id] = copy(sys.state)
+        end
+    end
+    stale_ids = String[]
+    for sys_id in keys(state.last_finite_states)
+        if !(sys_id in world_ids)
+            push!(stale_ids, sys_id)
+        end
+    end
+    for sys_id in stale_ids
+        delete!(state.last_finite_states, sys_id)
+    end
+end
+
+function restore_last_finite_states!(state::ServerState)
+    restored = false
+    for (sys_id, sys) in state.world.systems
+        if haskey(state.last_finite_states, sys_id)
+            snap = state.last_finite_states[sys_id]
+            if length(snap) == length(sys.state)
+                sys.state .= snap
+                restored = true
+            end
+        end
+    end
+    return restored
+end
+
+function serialize_world_for_client(state::ServerState)
+    payload = serialize_world(state.world)
+    payload["dt"] = state.step_dt
+    return payload
 end
 
 # =============================================================================
@@ -114,7 +158,7 @@ function handle_message!(state::ServerState, msg::Dict{String, Any})
         return Dict("type" => "Templates", "templates" => list_templates())
 
     elseif msg_type == "GetWorldState"
-        return serialize_world(world)
+        return serialize_world_for_client(state)
 
     elseif msg_type == "DefineCustomSystem"
         return handle_define_custom_system!(state, msg)
@@ -158,6 +202,7 @@ function handle_add_system!(state::ServerState, msg::Dict{String, Any})
 
         # Trigger recomposition
         recompose!(state)
+        snapshot_finite_states!(state)
 
         return Dict("type" => "Ack", "success" => true, "action" => "AddSystem", "instanceId" => instance_id)
     catch e
@@ -175,6 +220,7 @@ function handle_remove_system!(state::ServerState, msg::Dict{String, Any})
 
         # Trigger recomposition
         recompose!(state)
+        snapshot_finite_states!(state)
 
         return Dict("type" => "Ack", "success" => true, "action" => "RemoveSystem", "instanceId" => instance_id)
     catch e
@@ -238,6 +284,7 @@ function handle_set_params!(state::ServerState, msg::Dict{String, Any})
 
         # Trigger recomposition with new machine
         recompose!(state)
+        snapshot_finite_states!(state)
 
         return Dict("type" => "Ack", "success" => true, "action" => "SetParams", "instanceId" => instance_id)
     catch e
@@ -253,6 +300,7 @@ function handle_set_state!(state::ServerState, msg::Dict{String, Any})
 
     try
         set_system_state!(world, instance_id, Float64.(new_state))
+        snapshot_finite_states!(state)
         return Dict("type" => "Ack", "success" => true, "action" => "SetState", "instanceId" => instance_id)
     catch e
         return Dict("type" => "Error", "code" => "SET_STATE_FAILED", "message" => string(e))
@@ -273,10 +321,29 @@ function handle_control!(state::ServerState, msg::Dict{String, Any})
 
     elseif action == "step"
         # Single step
-        if state.composed !== nothing
-            step_world!(world, state.composed, world.dt)
-        else
-            step_world_independent!(world, world.dt)
+        try
+            if state.composed !== nothing
+                step_world!(world, state.composed, state.step_dt)
+            else
+                step_world_independent!(world, state.step_dt)
+            end
+            snapshot_finite_states!(state)
+        catch e
+            if e isa NonFiniteSimulationError
+                world.running = false
+                msg = "Simulation paused due to non-finite values: $(e)"
+                return Dict(
+                    "type" => "Error",
+                    "code" => "NON_FINITE_STATE",
+                    "message" => msg,
+                    "stage" => e.stage,
+                    "systemId" => e.system_id,
+                    "time" => e.time,
+                    "dt" => e.dt,
+                    "indices" => e.indices
+                )
+            end
+            rethrow(e)
         end
 
     elseif action == "reset"
@@ -285,6 +352,7 @@ function handle_control!(state::ServerState, msg::Dict{String, Any})
             _, initial_state = Systems.create_system(sys.template_id, sys.parameters)
             sys.state .= initial_state
         end
+        snapshot_finite_states!(state)
         println("Simulation reset")
 
     elseif action == "setSpeed"
@@ -294,8 +362,17 @@ function handle_control!(state::ServerState, msg::Dict{String, Any})
 
     elseif action == "setDt"
         dt = get(msg, "dt", 0.001)
-        world.dt = Float64(dt)
-        println("dt set to $(world.dt)")
+        state.step_dt = Float64(dt)
+        println("step dt set to $(state.step_dt)")
+
+    elseif action == "resumeFinite"
+        if restore_last_finite_states!(state)
+            world.running = false
+            println("Restored last finite state snapshot")
+            return Dict("type" => "Ack", "success" => true, "action" => action)
+        else
+            return Dict("type" => "Error", "code" => "NO_FINITE_SNAPSHOT", "message" => "No finite snapshot is available yet")
+        end
     end
 
     return Dict("type" => "Ack", "success" => true, "action" => action)
@@ -359,7 +436,7 @@ function broadcast_to_clients(state::ServerState, message::Dict)
 end
 
 function broadcast_world_state(state::ServerState)
-    broadcast_to_clients(state, serialize_world(state.world))
+    broadcast_to_clients(state, serialize_world_for_client(state))
 end
 
 function broadcast_state_update(state::ServerState)
@@ -400,12 +477,33 @@ function simulation_loop(state::ServerState)
 
                 # Record history for visualization trails
                 record_history!(state.world)
+                snapshot_finite_states!(state)
 
                 # Broadcast state update
                 broadcast_state_update(state)
                 error_count = 0
             catch e
                 error_count += 1
+                if e isa NonFiniteSimulationError
+                    state.world.running = false
+                    msg = "Simulation paused due to non-finite values: $(e)"
+                    println(msg)
+                    broadcast_to_clients(state, Dict(
+                        "type" => "Error",
+                        "code" => "NON_FINITE_STATE",
+                        "message" => msg,
+                        "stage" => e.stage,
+                        "systemId" => e.system_id,
+                        "time" => e.time,
+                        "dt" => e.dt,
+                        "indices" => e.indices,
+                        "action" => "paused",
+                        "recoverAction" => "resumeFinite"
+                    ))
+                    error_count = 0
+                    continue
+                end
+
                 if error_count <= 3
                     println("Simulation error ($(error_count)): $e")
                     println(stacktrace(catch_backtrace()))
@@ -466,7 +564,7 @@ function start_server(; port=8082)
             send(ws, JSON3.write(Dict("type" => "Templates", "templates" => list_templates())))
 
             # Send current world state
-            send(ws, JSON3.write(serialize_world(state.world)))
+            send(ws, JSON3.write(serialize_world_for_client(state)))
         catch e
             println("Error sending initial state: $e")
         end

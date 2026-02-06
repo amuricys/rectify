@@ -17,6 +17,36 @@
 
 	// Template hover popup
 	let hoveredTemplate = $state<string | null>(null);
+	let pendingSpeed = $state(1);
+	let pendingDt = $state('0.001');
+	let dtApplied = $state(false);
+	let dtAppliedTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => {
+		pendingSpeed = algebraic.speed;
+	});
+
+	$effect(() => {
+		pendingDt = algebraic.dt.toString();
+	});
+
+	function applySpeed(value: number) {
+		const clamped = Math.max(0.1, Math.min(5, value));
+		pendingSpeed = clamped;
+		algebraic.setSpeed(clamped);
+	}
+
+	function applyDt() {
+		const parsed = Number(pendingDt);
+		if (!Number.isFinite(parsed) || parsed <= 0) return;
+		algebraic.setDt(parsed);
+		dtApplied = true;
+		if (dtAppliedTimer) clearTimeout(dtAppliedTimer);
+		dtAppliedTimer = setTimeout(() => {
+			dtApplied = false;
+			dtAppliedTimer = null;
+		}, 900);
+	}
 
 	function createWire() {
 		if (wireFrom && wireTo && wireFrom !== wireTo) {
@@ -51,16 +81,33 @@
 		{/if}
 		{#if algebraic.error}
 			<div class="error">{algebraic.error}</div>
+			{#if algebraic.errorCode === 'NON_FINITE_STATE' && algebraic.recoverAction === 'resumeFinite'}
+				<button class="small" onclick={() => algebraic.resumeFinite()}>Resume Last Finite</button>
+			{/if}
 		{/if}
 	</div>
 
 	<div class="control-group">
 		<span class="label">Playback</span>
-		<div class="button-row">
+		<div class="button-row playback-row">
 			<button onclick={() => algebraic.toggle()} class:active={algebraic.running}>
 				{algebraic.running ? 'Pause' : 'Play'}
 			</button>
-			<button onclick={() => algebraic.step()}>Step</button>
+			<div class="step-inline">
+				<button class="step-btn" onclick={() => algebraic.step()}>Step</button>
+				<span class:applied={dtApplied}>{dtApplied ? '✓' : 'dt ='}</span>
+				<input
+					type="text"
+					bind:value={pendingDt}
+					class="dt-input"
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							applyDt();
+						}
+					}}
+				/>
+			</div>
 			<button onclick={() => algebraic.reset()}>Reset</button>
 		</div>
 	</div>
@@ -73,10 +120,10 @@
 				min="0.1"
 				max="5"
 				step="0.1"
-				bind:value={algebraic.speed}
-				onchange={() => algebraic.setSpeed(algebraic.speed)}
+				value={pendingSpeed}
+				oninput={(e) => applySpeed(Number((e.currentTarget as HTMLInputElement).value))}
 			/>
-			<span class="speed-value">{algebraic.speed.toFixed(1)}x</span>
+			<span class="speed-value">{pendingSpeed.toFixed(1)}x</span>
 		</div>
 	</div>
 
@@ -115,26 +162,51 @@
 	{/if}
 
 	{#if algebraic.systemList.length > 0}
-		<div class="control-group">
-			<span class="label">Systems ({algebraic.systemList.length})</span>
-			<div class="system-list">
-				{#each algebraic.systemList as sys}
-					<div class="system-item">
-						<div class="system-header">
-							<span class="system-id">{sys.id.split('_')[0]}</span>
-							<button class="small danger" onclick={() => algebraic.removeSystem(sys.id)}>×</button>
+		{@const standaloneSystems = algebraic.systemList.filter(s => !algebraic.getCompositeForSystem(s.id))}
+		{#if algebraic.compositeGroups.length > 0}
+			<div class="control-group">
+				<span class="label">Composites ({algebraic.compositeGroups.length})</span>
+				<div class="system-list">
+					{#each algebraic.compositeGroups as group}
+						<div class="system-item composite-item">
+							<div class="system-header">
+								<span class="system-id composite-name">{group.name}</span>
+							</div>
+							<div class="composite-members">
+								{#each group.memberSystemIds as memberId}
+									{@const sys = algebraic.systemList.find(s => s.id === memberId)}
+									{#if sys}
+										<span class="member-tag">{sys.templateId.split('_')[0]}</span>
+									{/if}
+								{/each}
+							</div>
 						</div>
-						<div class="system-state">
-							{#each sys.state as val, i}
-								{@const tmpl = algebraic.templateList.find(t => t.id === sys.templateId)}
-								{@const name = tmpl?.state_names?.[i] ?? `v${i}`}
-								<span class="state-val" title={name}><span class="state-name">{name}:</span> {val.toFixed(2)}</span>
-							{/each}
-						</div>
-					</div>
-				{/each}
+					{/each}
+				</div>
 			</div>
-		</div>
+		{/if}
+
+		{#if standaloneSystems.length > 0}
+			<div class="control-group">
+				<span class="label">Systems ({standaloneSystems.length})</span>
+				<div class="system-list">
+					{#each standaloneSystems as sys}
+						<div class="system-item">
+							<div class="system-header">
+								<span class="system-id">{sys.id.split('_')[0]}</span>
+							</div>
+							<div class="system-state">
+								{#each sys.state as val, i}
+									{@const tmpl = algebraic.templateList.find(t => t.id === sys.templateId)}
+									{@const name = tmpl?.state_names?.[i] ?? `v${i}`}
+									<span class="state-val" title={name}><span class="state-name">{name}:</span> {val.toFixed(2)}</span>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<div class="control-group">
 			<span class="label">Wire Systems</span>
@@ -248,6 +320,11 @@
 		display: flex;
 		gap: 0.25rem;
 		flex-wrap: wrap;
+		align-items: center;
+	}
+
+	.playback-row {
+		row-gap: 0.4rem;
 	}
 
 	button {
@@ -305,6 +382,43 @@
 		text-align: right;
 	}
 
+	.step-inline {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.25rem 0.45rem;
+		background: var(--bg-dark);
+		border: 1px solid var(--border);
+		font-size: 0.75rem;
+	}
+
+	.step-btn {
+		margin-right: 0.2rem;
+	}
+
+	.step-inline span {
+		color: var(--text-dim);
+		font-family: 'CMU Serif', serif;
+		min-width: 2.4rem;
+		text-align: right;
+		transition: color 0.12s ease;
+	}
+
+	.step-inline span.applied {
+		color: #7a9b68;
+		font-weight: 700;
+	}
+
+	.dt-input {
+		width: 4.8rem;
+		padding: 0.2rem 0.35rem;
+		font-size: 0.75rem;
+		border: 1px solid var(--border);
+		background: transparent;
+		color: var(--accent);
+		font-family: monospace;
+	}
+
 	.template-grid {
 		display: grid;
 		grid-template-columns: repeat(2, 1fr);
@@ -350,7 +464,8 @@
 
 	.popup-item {
 		color: var(--accent);
-		font-family: monospace;
+		font-family: 'CMU Serif', serif;
+		font-style: italic;
 		font-size: 0.65rem;
 		padding-left: 0.25rem;
 	}
@@ -404,7 +519,8 @@
 
 	.state-val {
 		color: var(--text-dim);
-		font-family: monospace;
+		font-family: 'CMU Serif', serif;
+		font-style: italic;
 		font-size: 0.7rem;
 	}
 
@@ -462,11 +578,34 @@
 
 	.wire-value {
 		color: var(--accent);
-		font-family: monospace;
+		font-family: 'CMU Serif', serif;
 	}
 
 	.time-display {
 		font-size: 1rem;
 		color: var(--accent);
+	}
+
+	.composite-item {
+		border-color: #4d3d2e;
+		border-style: dashed;
+	}
+
+	.composite-name {
+		font-size: 0.7rem;
+	}
+
+	.composite-members {
+		display: flex;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.member-tag {
+		font-size: 0.65rem;
+		color: var(--text-dim);
+		background: var(--bg-panel, #1a1410);
+		padding: 0.1rem 0.3rem;
+		border: 1px solid #3a2e24;
 	}
 </style>

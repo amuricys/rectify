@@ -8,7 +8,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as THREE from 'three';
-	import { algebraic, type SystemState } from '$lib/stores/algebraic.svelte';
+	import { algebraic, type SystemState, type WireState, type CompositeGroup, type FreeStateInfo } from '$lib/stores/algebraic.svelte';
 
 	interface Props {
 		width: number;
@@ -48,7 +48,7 @@
 		resizeHandle: THREE.Mesh;
 		// Content
 		contentGroup: THREE.Group;
-		border: THREE.LineSegments;
+		border: THREE.Line;
 		// Phase space view
 		trailGeometry: THREE.BufferGeometry;
 		trail: THREE.Line;
@@ -89,6 +89,20 @@
 		// Edit button
 		editButton: THREE.Mesh;
 		editButtonLabel: THREE.Sprite;
+		// Close & minimize buttons
+		closeButton: THREE.Mesh;
+		closeButtonLabel: THREE.Sprite;
+		minimizeButton: THREE.Mesh;
+		minimizeButtonLabel: THREE.Sprite;
+		// Minimized state
+		minimized: boolean;
+		paramsExpanded: boolean;
+		stateValueSprites: THREE.Sprite[];
+		paramValueSprites: THREE.Sprite[];
+		caretButton: THREE.Mesh | null;
+		caretLabel: THREE.Sprite | null;
+		savedWindowHeight: number;
+		lastMinimizedUpdate: number;
 	}
 
 	// B3: Port dot visual
@@ -115,6 +129,62 @@
 		valueGeometry: THREE.BufferGeometry;
 	}
 
+	// Composite window visualization
+	interface CompositeWindow {
+		id: string;
+		group: THREE.Group;
+		border: THREE.Line;
+		header: THREE.Mesh;
+		headerLabel: THREE.Sprite;
+		closeButton: THREE.Mesh;
+		closeButtonLabel: THREE.Sprite;
+		minimizeButton: THREE.Mesh;
+		minimizeButtonLabel: THREE.Sprite;
+		lookInsideButton: THREE.Mesh;
+		lookInsideLabel: THREE.Sprite;
+		// Outer visualization
+		contentGroup: THREE.Group;
+		timeSeriesGroup: THREE.Group;
+		timeSeriesLines: THREE.Line[];
+		timeSeriesGeometries: THREE.BufferGeometry[];
+		tsAxisLines: THREE.LineSegments;
+		yTickSprite: THREE.Sprite;
+		xTickSprite: THREE.Sprite;
+		legendSprites: THREE.Sprite[];
+		// Layout
+		windowWidth: number;
+		windowHeight: number;
+		lookInside: boolean;
+		minimized: boolean;
+		combinedNstates: number;
+		memberWindowIds: string[];
+		color: THREE.Color;
+		// Time series range
+		tsYMin: number;
+		tsYMax: number;
+		// Free state tracking
+		freeStates: FreeStateInfo[];
+		// Ghost wires (dashed lines from border to inner unconnected ports)
+		ghostWires: THREE.Line[];
+		// Cached name for detecting changes
+		cachedName: string;
+		// Skeleton view (shown when NOT look-inside)
+		skeletonGroup: THREE.Group | null;
+		// Composite ports on outer border
+		compositePorts: CompositePort[];
+	}
+
+	// Composite port on the outer box border
+	interface CompositePort {
+		memberSystemId: string;
+		portIndex: number;
+		isOutput: boolean;
+		mesh: THREE.Mesh;
+		ring: THREE.LineLoop;
+		hitArea: THREE.Mesh;
+		label: THREE.Sprite;
+	}
+
 	// Colors for individual state variables in time series view
 	const STATE_COLORS = [
 		new THREE.Color(0xd4785a), // warm-red
@@ -133,8 +203,12 @@
 	const TS_MARGIN = { left: 10, right: 12, bottom: 8, top: 4 };
 	const NUM_TICKS = 5;
 	const PHASE_HALF_EXTENT = 14; // local units for phase mapping
+	const PHASE_BOUNDS_HISTORY = 500;
+	const CORNER_RADIUS = 2.5; // world units for rounded corners
+	const CANVAS_FONT = "'CMU Serif', serif";
 
 	const systemWindows = new Map<string, SystemWindow>();
+	const compositeWindows = new Map<string, CompositeWindow>();
 	const MAX_POINTS = 2000;
 
 	// Drag state
@@ -151,12 +225,20 @@
 	// Edit system state
 	let editingSystemId: string | null = $state(null);
 
+	// Close confirm state
+	let closeConfirmId: string | null = null;
+	let closeConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+	let closeConfirmTooltip: THREE.Sprite | null = null;
+	let closeConfirmWindow: SystemWindow | null = null;
+	let closeConfirmGroup: THREE.Group | null = null; // For composite close confirm
+
 	// B6: Wire drag state
 	let isWiring = false;
 	let wireSourcePort: PortDot | null = null;
+	let pendingRewire: WireState | null = null;
 	let wireDragLine: THREE.Line | null = null;
 	let lastWireDragTime = 0;
-	const WIRE_DRAG_MAX_VERTS = 50;
+	const WIRE_DRAG_MAX_VERTS = 200;
 
 	// B4: Wire visuals
 	const wireVisuals = new Map<string, WireVisual>();
@@ -224,6 +306,67 @@
 		canvasEl.addEventListener('wheel', onWheel);
 	}
 
+	// Phase 2: Rounded rect shape helper
+	function createRoundedRectShape(w: number, h: number, r: number): THREE.Shape {
+		const shape = new THREE.Shape();
+		const x = -w / 2, y = -h / 2;
+		shape.moveTo(x + r, y);
+		shape.lineTo(x + w - r, y);
+		shape.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false);
+		shape.lineTo(x + w, y + h - r);
+		shape.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false);
+		shape.lineTo(x + r, y + h);
+		shape.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false);
+		shape.lineTo(x, y + r);
+		shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
+		return shape;
+	}
+
+	function createRoundedRectBorder(
+		w: number,
+		h: number,
+		r: number,
+		material: THREE.LineBasicMaterial | THREE.LineDashedMaterial
+	): THREE.Line {
+		const shape = createRoundedRectShape(w, h, r);
+		const points = shape.getPoints(32);
+		const geom = new THREE.BufferGeometry().setFromPoints(
+			points.map((p) => new THREE.Vector3(p.x, p.y, 0))
+		);
+		const line = new THREE.Line(geom, material);
+		if (material instanceof THREE.LineDashedMaterial) {
+			line.computeLineDistances();
+		}
+		return line;
+	}
+
+	// Phase 2: Rounded-top header shape (flat bottom, rounded top corners)
+	function createHeaderShape(width: number, headerHeight: number, radius: number): THREE.Shape {
+		const shape = new THREE.Shape();
+		const x = -width / 2, y = -headerHeight / 2;
+		// Start at bottom-left, go right (flat bottom)
+		shape.moveTo(x, y);
+		shape.lineTo(x + width, y);
+		// Right side up, rounded top-right
+		shape.lineTo(x + width, y + headerHeight - radius);
+		shape.absarc(x + width - radius, y + headerHeight - radius, radius, 0, Math.PI / 2, false);
+		// Top edge, right to left
+		shape.lineTo(x + radius, y + headerHeight);
+		// Rounded top-left
+		shape.absarc(x + radius, y + headerHeight - radius, radius, Math.PI / 2, Math.PI, false);
+		// Left side down
+		shape.lineTo(x, y);
+		return shape;
+	}
+
+	// Phase 4: Smooth wire path with CatmullRom curve
+	function smoothWirePath(points: THREE.Vector3[]): THREE.Vector3[] {
+		if (points.length <= 2) return points;
+		const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.3);
+		const numSamples = Math.max(points.length * 8, 32);
+		return curve.getPoints(numSamples);
+	}
+
 	function createTextSprite(text: string, color: THREE.Color): THREE.Sprite {
 		const canvas = document.createElement('canvas');
 		const context = canvas.getContext('2d')!;
@@ -233,7 +376,7 @@
 		context.fillStyle = 'transparent';
 		context.fillRect(0, 0, canvas.width, canvas.height);
 
-		context.font = 'bold 28px monospace';
+		context.font = `700 28px ${CANVAS_FONT}`;
 		context.fillStyle = `rgb(${Math.floor(color.r * 255)}, ${Math.floor(color.g * 255)}, ${Math.floor(color.b * 255)})`;
 		context.textAlign = 'left';
 		context.textBaseline = 'middle';
@@ -269,7 +412,7 @@
 			context.stroke();
 		}
 
-		context.font = 'bold 18px monospace';
+		context.font = `700 18px ${CANVAS_FONT}`;
 		context.fillStyle = active ? '#ffffff' : '#9a8b78';
 		context.textAlign = 'center';
 		context.textBaseline = 'middle';
@@ -291,7 +434,7 @@
 		context.fillStyle = `rgb(${Math.floor(color.r * 255)}, ${Math.floor(color.g * 255)}, ${Math.floor(color.b * 255)})`;
 		context.fillRect(4, 10, 12, 12);
 
-		context.font = 'bold 16px monospace';
+		context.font = `italic 16px ${CANVAS_FONT}`;
 		context.fillStyle = '#9a8b78';
 		context.textAlign = 'left';
 		context.textBaseline = 'middle';
@@ -302,6 +445,42 @@
 		const sprite = new THREE.Sprite(material);
 		sprite.scale.set(6, 3, 1);
 		return sprite;
+	}
+
+	function createTooltipSprite(text: string, color: string): THREE.Sprite {
+		const canvas = document.createElement('canvas');
+		const ctx = canvas.getContext('2d')!;
+		canvas.width = 256;
+		canvas.height = 32;
+		ctx.font = `400 14px ${CANVAS_FONT}`;
+		ctx.fillStyle = color;
+		ctx.textAlign = 'left';
+		ctx.textBaseline = 'middle';
+		ctx.fillText(text, 4, canvas.height / 2);
+		const texture = new THREE.CanvasTexture(canvas);
+		const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+		const sprite = new THREE.Sprite(material);
+		sprite.scale.set(22, 3, 1);
+		return sprite;
+	}
+
+	function resetCloseConfirm() {
+		if (closeConfirmTimer) {
+			clearTimeout(closeConfirmTimer);
+			closeConfirmTimer = null;
+		}
+		if (closeConfirmTooltip) {
+			const parentGroup = closeConfirmWindow?.group ?? closeConfirmGroup;
+			if (parentGroup) {
+				parentGroup.remove(closeConfirmTooltip);
+			}
+			(closeConfirmTooltip.material as THREE.SpriteMaterial).map?.dispose();
+			(closeConfirmTooltip.material as THREE.Material).dispose();
+			closeConfirmTooltip = null;
+		}
+		closeConfirmId = null;
+		closeConfirmWindow = null;
+		closeConfirmGroup = null;
 	}
 
 	function formatTickValue(value: number): string {
@@ -331,7 +510,7 @@
 		const ctx = canvas.getContext('2d')!;
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-		ctx.font = 'bold 22px monospace';
+		ctx.font = `400 20px ${CANVAS_FONT}`;
 		ctx.fillStyle = '#9a8b78';
 		ctx.textAlign = 'right';
 
@@ -347,8 +526,11 @@
 		}
 
 		texture.needsUpdate = true;
+		// Phase 3: Fixed-size tick labels — clamp scale
 		const yAxisHeight = winH - TS_MARGIN.bottom - TS_MARGIN.top;
-		sprite.scale.set(10, yAxisHeight, 1);
+		const yFixedScale = 40;
+		const yScale = Math.min(yFixedScale, yAxisHeight);
+		sprite.scale.set(yScale * (128 / 512), yScale, 1);
 		sprite.position.set(-winW / 2 + TS_MARGIN.left / 2,
 			(TS_MARGIN.bottom - TS_MARGIN.top) / 2, 2);
 	}
@@ -360,7 +542,7 @@
 		const ctx = canvas.getContext('2d')!;
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-		ctx.font = 'bold 18px monospace';
+		ctx.font = `400 16px ${CANVAS_FONT}`;
 		ctx.fillStyle = '#9a8b78';
 		ctx.textAlign = 'center';
 
@@ -376,8 +558,11 @@
 		}
 
 		texture.needsUpdate = true;
+		// Phase 3: Fixed-size tick labels — clamp scale
 		const xAxisWidth = winW - TS_MARGIN.left - TS_MARGIN.right;
-		sprite.scale.set(xAxisWidth, 6, 1);
+		const xFixedScale = 40;
+		const xScale = Math.min(xFixedScale, xAxisWidth);
+		sprite.scale.set(xScale, xScale * (64 / 512), 1);
 		sprite.position.set((TS_MARGIN.left - TS_MARGIN.right) / 2,
 			-winH / 2 + TS_MARGIN.bottom / 2 - 1, 2);
 	}
@@ -544,7 +729,7 @@
 				const canvas = (sprite.material as THREE.SpriteMaterial).map!.image as HTMLCanvasElement;
 				const ctx = canvas.getContext('2d')!;
 				ctx.clearRect(0, 0, canvas.width, canvas.height);
-				ctx.font = 'bold 14px monospace';
+				ctx.font = `400 14px ${CANVAS_FONT}`;
 				ctx.fillStyle = '#9a8b78';
 				ctx.textAlign = 'center';
 				ctx.textBaseline = 'middle';
@@ -584,17 +769,20 @@
 	function mapStateToLocal(state: number[], win: SystemWindow, nstates: number): THREE.Vector3 {
 		const mapping = getPhaseMapping(win);
 		const result = new THREE.Vector3(0, 0, 0);
+		const sx = Number.isFinite(state[0]) ? state[0] : 0;
+		const sy = Number.isFinite(state[1]) ? state[1] : 0;
+		const sz = Number.isFinite(state[2]) ? state[2] : 0;
 
 		if (nstates >= 3) {
-			result.x = (state[0] - mapping.center[0]) * mapping.scale;
-			result.y = (state[1] - mapping.center[1]) * mapping.scale;
-			result.z = (state[2] - mapping.center[2]) * mapping.scale;
+			result.x = (sx - mapping.center[0]) * mapping.scale;
+			result.y = (sy - mapping.center[1]) * mapping.scale;
+			result.z = (sz - mapping.center[2]) * mapping.scale;
 		} else if (nstates >= 2) {
-			result.x = (state[0] - mapping.center[0]) * mapping.scale;
-			result.y = (state[1] - mapping.center[1]) * mapping.scale;
+			result.x = (sx - mapping.center[0]) * mapping.scale;
+			result.y = (sy - mapping.center[1]) * mapping.scale;
 			result.z = 0;
 		} else if (nstates >= 1) {
-			result.x = (state[0] - mapping.center[0]) * mapping.scale;
+			result.x = (sx - mapping.center[0]) * mapping.scale;
 			result.y = 0;
 			result.z = 0;
 		}
@@ -931,7 +1119,8 @@
 			});
 		}
 
-		const route = computeWireRoute(from, to, obstacles);
+		const rawRoute = computeWireRoute(from, to, obstacles);
+		const route = smoothWirePath(rawRoute);
 		const positions = new Float32Array(route.length * 3);
 		for (let i = 0; i < route.length; i++) {
 			positions[i * 3] = route[i].x;
@@ -1045,24 +1234,50 @@
 
 		group.position.set(sys.position?.x ?? defaultX, sys.position?.y ?? defaultY, 0);
 
-		// Window border
-		const borderGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(winWidth, winHeight + HEADER_HEIGHT));
+		// Window border (rounded corners)
 		const borderMaterial = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 });
-		const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+		const border = createRoundedRectBorder(winWidth, winHeight + HEADER_HEIGHT, CORNER_RADIUS, borderMaterial);
 		group.add(border);
 
-		// Header bar
-		const headerGeometry = new THREE.PlaneGeometry(winWidth, HEADER_HEIGHT);
+		// Header bar (rounded top corners)
+		const headerShape = createHeaderShape(winWidth, HEADER_HEIGHT, CORNER_RADIUS);
+		const headerGeometry = new THREE.ShapeGeometry(headerShape);
 		const headerMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
 		const header = new THREE.Mesh(headerGeometry, headerMaterial);
 		header.position.set(0, winHeight / 2, 0);
 		header.userData = { isHeader: true, systemId: id };
 		group.add(header);
 
-		// Label
+		// Close button (X)
+		const closeButtonGeom = new THREE.PlaneGeometry(3, 3);
+		const closeButtonMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const closeButton = new THREE.Mesh(closeButtonGeom, closeButtonMat);
+		closeButton.position.set(-winWidth / 2 + 3, winHeight / 2, 1);
+		closeButton.userData = { isCloseButton: true, systemId: id };
+		group.add(closeButton);
+
+		const closeButtonLabel = createButtonSprite('x', false);
+		closeButtonLabel.position.set(-winWidth / 2 + 3, winHeight / 2, 2);
+		closeButtonLabel.scale.set(4, 3.5, 1);
+		group.add(closeButtonLabel);
+
+		// Minimize button (—)
+		const minimizeButtonGeom = new THREE.PlaneGeometry(3, 3);
+		const minimizeButtonMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const minimizeButton = new THREE.Mesh(minimizeButtonGeom, minimizeButtonMat);
+		minimizeButton.position.set(-winWidth / 2 + 7, winHeight / 2, 1);
+		minimizeButton.userData = { isMinimizeButton: true, systemId: id };
+		group.add(minimizeButton);
+
+		const minimizeButtonLabel = createButtonSprite('\u2014', false);
+		minimizeButtonLabel.position.set(-winWidth / 2 + 7, winHeight / 2, 2);
+		minimizeButtonLabel.scale.set(4, 3.5, 1);
+		group.add(minimizeButtonLabel);
+
+		// Label (shifted right to make room for close/minimize)
 		const systemName = sys.templateId.split('_')[0];
 		const label = createTextSprite(systemName, color);
-		label.position.set(-winWidth / 2 + 12, winHeight / 2, 1);
+		label.position.set(-winWidth / 2 + 16, winHeight / 2, 1);
 		group.add(label);
 
 		// Mode buttons
@@ -1207,14 +1422,18 @@
 		const tsAxisLines = new THREE.LineSegments(tsAxisGeometry, tsAxisMaterial);
 		timeSeriesGroup.add(tsAxisLines);
 
-		// Tick sprites
+		// Tick sprites (Phase 3: fixed-size)
 		const yTickSprite = createTickSprite(128, 512);
-		yTickSprite.scale.set(10, winHeight - TS_MARGIN.bottom - TS_MARGIN.top, 1);
+		const initYAxisH = winHeight - TS_MARGIN.bottom - TS_MARGIN.top;
+		const initYScale = Math.min(40, initYAxisH);
+		yTickSprite.scale.set(initYScale * (128 / 512), initYScale, 1);
 		yTickSprite.position.set(-winWidth / 2 + TS_MARGIN.left / 2, (TS_MARGIN.bottom - TS_MARGIN.top) / 2, 2);
 		timeSeriesGroup.add(yTickSprite);
 
 		const xTickSprite = createTickSprite(512, 64);
-		xTickSprite.scale.set(winWidth - TS_MARGIN.left - TS_MARGIN.right, 6, 1);
+		const initXAxisW = winWidth - TS_MARGIN.left - TS_MARGIN.right;
+		const initXScale = Math.min(40, initXAxisW);
+		xTickSprite.scale.set(initXScale, initXScale * (64 / 512), 1);
 		xTickSprite.position.set((TS_MARGIN.left - TS_MARGIN.right) / 2, -winHeight / 2 + TS_MARGIN.bottom / 2 - 1, 2);
 		timeSeriesGroup.add(xTickSprite);
 
@@ -1237,7 +1456,13 @@
 			bounds: { min: new THREE.Vector3(Infinity, Infinity, Infinity), max: new THREE.Vector3(-Infinity, -Infinity, -Infinity), initialized: false },
 			tsYMin: Infinity, tsYMax: -Infinity,
 			outputPorts, inputPorts, portDividerLine: dividerLine,
-			editButton, editButtonLabel
+			editButton, editButtonLabel,
+			closeButton, closeButtonLabel,
+			minimizeButton, minimizeButtonLabel,
+			minimized: false, paramsExpanded: false,
+			stateValueSprites: [], paramValueSprites: [],
+			caretButton: null, caretLabel: null,
+			savedWindowHeight: winHeight, lastMinimizedUpdate: 0
 		};
 	}
 
@@ -1251,19 +1476,71 @@
 		return win;
 	}
 
-	function updateBounds(win: SystemWindow, state: number[]) {
-		if (state.length >= 1) {
-			win.bounds.min.x = Math.min(win.bounds.min.x, state[0]);
-			win.bounds.max.x = Math.max(win.bounds.max.x, state[0]);
+	function isFiniteState(state: number[], nstates: number): boolean {
+		const dims = Math.min(nstates, 3);
+		for (let i = 0; i < dims; i++) {
+			if (!Number.isFinite(state[i])) return false;
 		}
-		if (state.length >= 2) {
-			win.bounds.min.y = Math.min(win.bounds.min.y, state[1]);
-			win.bounds.max.y = Math.max(win.bounds.max.y, state[1]);
+		return true;
+	}
+
+	function extendBounds(min: THREE.Vector3, max: THREE.Vector3, state: number[], nstates: number) {
+		if (nstates >= 1) {
+			min.x = Math.min(min.x, state[0]);
+			max.x = Math.max(max.x, state[0]);
 		}
-		if (state.length >= 3) {
-			win.bounds.min.z = Math.min(win.bounds.min.z, state[2]);
-			win.bounds.max.z = Math.max(win.bounds.max.z, state[2]);
+		if (nstates >= 2) {
+			min.y = Math.min(min.y, state[1]);
+			max.y = Math.max(max.y, state[1]);
 		}
+		if (nstates >= 3) {
+			min.z = Math.min(min.z, state[2]);
+			max.z = Math.max(max.z, state[2]);
+		}
+	}
+
+	function recomputeBounds(win: SystemWindow, history: number[][], currentState: number[]) {
+		const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+		const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+		let hasFiniteSamples = false;
+		const dims = Math.min(win.nstates, 3);
+		const start = Math.max(0, history.length - PHASE_BOUNDS_HISTORY);
+
+		for (let i = start; i < history.length; i++) {
+			const state = history[i];
+			if (!isFiniteState(state, win.nstates)) continue;
+			extendBounds(min, max, state, win.nstates);
+			hasFiniteSamples = true;
+		}
+
+		if (isFiniteState(currentState, win.nstates)) {
+			extendBounds(min, max, currentState, win.nstates);
+			hasFiniteSamples = true;
+		}
+
+		if (!hasFiniteSamples) {
+			win.bounds.min.set(-1, -1, -1);
+			win.bounds.max.set(1, 1, 1);
+			win.bounds.initialized = true;
+			return;
+		}
+
+		// Keep origin visible while still allowing follow behavior.
+		if (dims >= 1) {
+			min.x = Math.min(min.x, 0);
+			max.x = Math.max(max.x, 0);
+		}
+		if (dims >= 2) {
+			min.y = Math.min(min.y, 0);
+			max.y = Math.max(max.y, 0);
+		}
+		if (dims >= 3) {
+			min.z = Math.min(min.z, 0);
+			max.z = Math.max(max.z, 0);
+		}
+
+		win.bounds.min.copy(min);
+		win.bounds.max.copy(max);
 		win.bounds.initialized = true;
 	}
 
@@ -1317,16 +1594,22 @@
 		win.windowHeight = newHeight;
 
 		win.group.remove(win.border);
-		const newBorderGeom = new THREE.EdgesGeometry(new THREE.PlaneGeometry(newWidth, newHeight + HEADER_HEIGHT));
 		win.border.geometry.dispose();
-		win.border.geometry = newBorderGeom;
+		(win.border.material as THREE.Material).dispose();
+		const newBorderMat = new THREE.LineBasicMaterial({ color: win.color, transparent: true, opacity: 0.5 });
+		win.border = createRoundedRectBorder(newWidth, newHeight + HEADER_HEIGHT, CORNER_RADIUS, newBorderMat);
 		win.group.add(win.border);
 
 		win.header.geometry.dispose();
-		win.header.geometry = new THREE.PlaneGeometry(newWidth, HEADER_HEIGHT);
+		const newHeaderShape = createHeaderShape(newWidth, HEADER_HEIGHT, CORNER_RADIUS);
+		win.header.geometry = new THREE.ShapeGeometry(newHeaderShape);
 		win.header.position.set(0, newHeight / 2, 0);
 
-		win.headerLabel.position.set(-newWidth / 2 + 12, newHeight / 2, 1);
+		win.closeButton.position.set(-newWidth / 2 + 3, newHeight / 2, 1);
+		win.closeButtonLabel.position.set(-newWidth / 2 + 3, newHeight / 2, 2);
+		win.minimizeButton.position.set(-newWidth / 2 + 7, newHeight / 2, 1);
+		win.minimizeButtonLabel.position.set(-newWidth / 2 + 7, newHeight / 2, 2);
+		win.headerLabel.position.set(-newWidth / 2 + 16, newHeight / 2, 1);
 
 		win.phaseButton.position.set(newWidth / 2 - 16, newHeight / 2, 1);
 		win.phaseButtonLabel.position.set(newWidth / 2 - 16, newHeight / 2, 2);
@@ -1354,11 +1637,14 @@
 		tsAxisPositions[10] = newHeight / 2 - TS_MARGIN.top;
 		win.tsAxisLines.geometry.attributes.position.needsUpdate = true;
 
+		// Phase 3: Fixed-size tick labels in resize
 		const yAxisHeight = newHeight - TS_MARGIN.bottom - TS_MARGIN.top;
-		win.yTickSprite.scale.set(8, yAxisHeight, 1);
+		const ryScale = Math.min(40, yAxisHeight);
+		win.yTickSprite.scale.set(ryScale * (128 / 512), ryScale, 1);
 		win.yTickSprite.position.set(-newWidth / 2 + TS_MARGIN.left / 2 - 1, (TS_MARGIN.bottom - TS_MARGIN.top) / 2, 2);
 		const xAxisWidth = newWidth - TS_MARGIN.left - TS_MARGIN.right;
-		win.xTickSprite.scale.set(xAxisWidth, 5, 1);
+		const rxScale = Math.min(40, xAxisWidth);
+		win.xTickSprite.scale.set(rxScale, rxScale * (64 / 512), 1);
 		win.xTickSprite.position.set((TS_MARGIN.left - TS_MARGIN.right) / 2, -newHeight / 2 + TS_MARGIN.bottom / 2 - 2, 2);
 
 		updateClipPlanes(win);
@@ -1406,20 +1692,1014 @@
 		}
 	}
 
+	function createMinimizedValueSprite(text: string): THREE.Sprite {
+		const canvas = document.createElement('canvas');
+		const ctx = canvas.getContext('2d')!;
+		canvas.width = 256;
+		canvas.height = 32;
+		ctx.font = `italic 16px ${CANVAS_FONT}`;
+		ctx.fillStyle = '#9a8b78';
+		ctx.textAlign = 'left';
+		ctx.textBaseline = 'middle';
+		ctx.fillText(text, 4, canvas.height / 2);
+		const texture = new THREE.CanvasTexture(canvas);
+		const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+		const sprite = new THREE.Sprite(material);
+		sprite.scale.set(16, 3, 1);
+		return sprite;
+	}
+
+	function updateMinimizedValueSprite(sprite: THREE.Sprite, text: string) {
+		const mat = sprite.material as THREE.SpriteMaterial;
+		const texture = mat.map!;
+		const canvas = texture.image as HTMLCanvasElement;
+		const ctx = canvas.getContext('2d')!;
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		ctx.font = `italic 16px ${CANVAS_FONT}`;
+		ctx.fillStyle = '#9a8b78';
+		ctx.textAlign = 'left';
+		ctx.textBaseline = 'middle';
+		ctx.fillText(text, 4, canvas.height / 2);
+		texture.needsUpdate = true;
+	}
+
+	function minimizeWindow(win: SystemWindow, sys: SystemState) {
+		win.savedWindowHeight = win.windowHeight;
+		win.minimized = true;
+		win.paramsExpanded = false;
+
+		// Hide visualization content
+		win.contentGroup.visible = false;
+		win.timeSeriesGroup.visible = false;
+		win.phaseButton.visible = false;
+		win.phaseButtonLabel.visible = false;
+		win.timeButton.visible = false;
+		win.timeButtonLabel.visible = false;
+		win.viewCycleButton.visible = false;
+		win.viewCycleLabel.visible = false;
+		win.editButton.visible = false;
+		win.editButtonLabel.visible = false;
+		win.resizeHandle.visible = false;
+
+		// Create state value sprites
+		const tmpl = algebraic.templateList.find(t => t.id === sys.templateId);
+		const stateNames = tmpl?.state_names ?? STATE_NAMES;
+		const nstates = sys.nstates;
+		const compactHeight = HEADER_HEIGHT + nstates * 3.5 + 4;
+
+		for (let i = 0; i < nstates; i++) {
+			const name = stateNames[i] || `v${i}`;
+			const val = sys.state[i]?.toFixed(3) ?? '0';
+			const sprite = createMinimizedValueSprite(`${name} = ${val}`);
+			sprite.position.set(-win.windowWidth / 2 + 12, win.windowHeight / 2 - HEADER_HEIGHT - 2 - i * 3.5, 1);
+			win.group.add(sprite);
+			win.stateValueSprites.push(sprite);
+		}
+
+		// Create caret button at bottom for expanding params
+		const params = tmpl?.parameters ?? [];
+		if (params.length > 0) {
+			const caretGeom = new THREE.PlaneGeometry(4, 3);
+			const caretMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+			const caretButton = new THREE.Mesh(caretGeom, caretMat);
+			const caretY = win.windowHeight / 2 - HEADER_HEIGHT - 2 - nstates * 3.5 - 1;
+			caretButton.position.set(-win.windowWidth / 2 + 6, caretY, 1);
+			caretButton.userData = { isCaretButton: true, systemId: sys.id };
+			win.group.add(caretButton);
+			win.caretButton = caretButton;
+
+			const caretLabel = createButtonSprite('\u25B6', false);
+			caretLabel.position.set(-win.windowWidth / 2 + 6, caretY, 2);
+			caretLabel.scale.set(4, 3, 1);
+			win.group.add(caretLabel);
+			win.caretLabel = caretLabel;
+		}
+
+		resizeWindow(win, win.windowWidth, compactHeight);
+		win.lastMinimizedUpdate = 0;
+	}
+
+	function restoreWindow(win: SystemWindow) {
+		win.minimized = false;
+		win.paramsExpanded = false;
+
+		// Show visualization content
+		if (win.viewMode === 'phase') {
+			win.contentGroup.visible = true;
+		} else {
+			win.timeSeriesGroup.visible = true;
+		}
+		win.phaseButton.visible = true;
+		win.phaseButtonLabel.visible = true;
+		win.timeButton.visible = true;
+		win.timeButtonLabel.visible = true;
+		win.viewCycleButton.visible = win.nstates >= 3;
+		win.viewCycleLabel.visible = win.nstates >= 3;
+		win.editButton.visible = true;
+		win.editButtonLabel.visible = true;
+		win.resizeHandle.visible = true;
+
+		// Remove state value sprites
+		for (const s of win.stateValueSprites) {
+			win.group.remove(s);
+			(s.material as THREE.SpriteMaterial).map?.dispose();
+			(s.material as THREE.Material).dispose();
+		}
+		win.stateValueSprites = [];
+
+		// Remove param value sprites
+		for (const s of win.paramValueSprites) {
+			win.group.remove(s);
+			(s.material as THREE.SpriteMaterial).map?.dispose();
+			(s.material as THREE.Material).dispose();
+		}
+		win.paramValueSprites = [];
+
+		// Remove caret
+		if (win.caretButton) {
+			win.group.remove(win.caretButton);
+			(win.caretButton.material as THREE.Material).dispose();
+			win.caretButton.geometry.dispose();
+			win.caretButton = null;
+		}
+		if (win.caretLabel) {
+			win.group.remove(win.caretLabel);
+			(win.caretLabel.material as THREE.SpriteMaterial).map?.dispose();
+			(win.caretLabel.material as THREE.Material).dispose();
+			win.caretLabel = null;
+		}
+
+		resizeWindow(win, win.windowWidth, win.savedWindowHeight);
+	}
+
+	function toggleParamsExpanded(win: SystemWindow, sys: SystemState) {
+		const tmpl = algebraic.templateList.find(t => t.id === sys.templateId);
+		const params = tmpl?.parameters ?? [];
+		if (params.length === 0) return;
+
+		win.paramsExpanded = !win.paramsExpanded;
+
+		if (win.paramsExpanded) {
+			// Show params
+			for (let i = 0; i < params.length; i++) {
+				const p = params[i];
+				const val = sys.parameters[p.name] ?? p.default;
+				const sprite = createMinimizedValueSprite(`${p.name} = ${val.toFixed(3)}`);
+				const yBase = win.windowHeight / 2 - HEADER_HEIGHT - 2 - sys.nstates * 3.5 - 2;
+				sprite.position.set(-win.windowWidth / 2 + 12, yBase - i * 3.5, 1);
+				win.group.add(sprite);
+				win.paramValueSprites.push(sprite);
+			}
+			// Update caret to point down
+			if (win.caretLabel) {
+				const oldLabel = win.caretLabel;
+				const newLabel = createButtonSprite('\u25BC', false);
+				newLabel.position.copy(oldLabel.position);
+				newLabel.scale.set(4, 3, 1);
+				win.group.remove(oldLabel);
+				win.group.add(newLabel);
+				(oldLabel.material as THREE.SpriteMaterial).map?.dispose();
+				(oldLabel.material as THREE.Material).dispose();
+				win.caretLabel = newLabel;
+			}
+			// Expand compact height
+			const newHeight = HEADER_HEIGHT + sys.nstates * 3.5 + 4 + params.length * 3.5 + 2;
+			resizeWindow(win, win.windowWidth, newHeight);
+		} else {
+			// Remove params
+			for (const s of win.paramValueSprites) {
+				win.group.remove(s);
+				(s.material as THREE.SpriteMaterial).map?.dispose();
+				(s.material as THREE.Material).dispose();
+			}
+			win.paramValueSprites = [];
+			// Update caret to point right
+			if (win.caretLabel) {
+				const oldLabel = win.caretLabel;
+				const newLabel = createButtonSprite('\u25B6', false);
+				newLabel.position.copy(oldLabel.position);
+				newLabel.scale.set(4, 3, 1);
+				win.group.remove(oldLabel);
+				win.group.add(newLabel);
+				(oldLabel.material as THREE.SpriteMaterial).map?.dispose();
+				(oldLabel.material as THREE.Material).dispose();
+				win.caretLabel = newLabel;
+			}
+			const compactHeight = HEADER_HEIGHT + sys.nstates * 3.5 + 4;
+			resizeWindow(win, win.windowWidth, compactHeight);
+		}
+	}
+
+	// Helper to set opacity on all materials in a THREE.Group
+	function setGroupOpacity(group: THREE.Group, opacity: number) {
+		group.traverse((child) => {
+			if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineLoop || child instanceof THREE.LineSegments) {
+				const mat = child.material as THREE.Material;
+				mat.transparent = true;
+				mat.opacity = Math.min(opacity, (mat as any)._baseOpacity ?? mat.opacity);
+				if ((mat as any)._baseOpacity === undefined) {
+					(mat as any)._baseOpacity = mat.opacity;
+				}
+				mat.opacity = opacity * ((mat as any)._baseOpacity ?? 1);
+			} else if (child instanceof THREE.Sprite) {
+				const mat = child.material as THREE.SpriteMaterial;
+				if ((mat as any)._baseOpacity === undefined) {
+					(mat as any)._baseOpacity = mat.opacity;
+				}
+				mat.opacity = opacity * ((mat as any)._baseOpacity ?? 1);
+			}
+		});
+	}
+
+	function restoreGroupOpacity(group: THREE.Group) {
+		group.traverse((child) => {
+			if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineLoop || child instanceof THREE.LineSegments) {
+				const mat = child.material as THREE.Material;
+				if ((mat as any)._baseOpacity !== undefined) {
+					mat.opacity = (mat as any)._baseOpacity;
+				}
+			} else if (child instanceof THREE.Sprite) {
+				const mat = child.material as THREE.SpriteMaterial;
+				if ((mat as any)._baseOpacity !== undefined) {
+					mat.opacity = (mat as any)._baseOpacity;
+				}
+			}
+		});
+	}
+
+	function createCompositeWindow(group: CompositeGroup): CompositeWindow {
+		const color = new THREE.Color(0x4d3d2e);
+
+		// Compute bounding box from member system positions
+		let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+		for (const memberId of group.memberSystemIds) {
+			const win = systemWindows.get(memberId);
+			if (win) {
+				const gx = win.group.position.x;
+				const gy = win.group.position.y;
+				const halfW = win.windowWidth / 2;
+				const halfH = (win.windowHeight + HEADER_HEIGHT) / 2;
+				minX = Math.min(minX, gx - halfW);
+				maxX = Math.max(maxX, gx + halfW);
+				minY = Math.min(minY, gy - halfH);
+				maxY = Math.max(maxY, gy + halfH);
+			}
+		}
+		const padding = 8;
+		minX -= padding; maxX += padding;
+		minY -= padding; maxY += padding;
+		const winWidth = maxX - minX;
+		const winHeight = maxY - minY - HEADER_HEIGHT;
+		const cx = (minX + maxX) / 2;
+		const cy = (minY + maxY) / 2;
+
+		const threeGroup = new THREE.Group();
+		threeGroup.position.set(cx, cy, -1);
+		threeGroup.userData = { compositeId: group.id };
+
+		// Dashed border (rounded corners)
+		const borderMat = new THREE.LineDashedMaterial({
+			color: 0x4d3d2e, dashSize: 2, gapSize: 1,
+			transparent: true, opacity: 0.6
+		});
+		const border = createRoundedRectBorder(winWidth, winHeight + HEADER_HEIGHT, CORNER_RADIUS, borderMat);
+		threeGroup.add(border);
+
+		// Header bar (rounded top)
+		const headerShape = createHeaderShape(winWidth, HEADER_HEIGHT, CORNER_RADIUS);
+		const headerGeom = new THREE.ShapeGeometry(headerShape);
+		const headerMat = new THREE.MeshBasicMaterial({
+			color: 0x3a2e24, transparent: true, opacity: 0.3, side: THREE.DoubleSide
+		});
+		const header = new THREE.Mesh(headerGeom, headerMat);
+		header.position.set(0, winHeight / 2, 0);
+		header.userData = { isCompositeHeader: true, compositeId: group.id };
+		threeGroup.add(header);
+
+		// Header label
+		const headerLabel = createTextSprite(group.name, color);
+		headerLabel.position.set(-winWidth / 2 + 16, winHeight / 2, 1);
+		threeGroup.add(headerLabel);
+
+		// Close button
+		const closeBtnGeom = new THREE.PlaneGeometry(3, 3);
+		const closeBtnMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const closeButton = new THREE.Mesh(closeBtnGeom, closeBtnMat);
+		closeButton.position.set(-winWidth / 2 + 3, winHeight / 2, 1);
+		closeButton.userData = { isCompositeCloseButton: true, compositeId: group.id };
+		threeGroup.add(closeButton);
+
+		const closeButtonLabel = createButtonSprite('x', false);
+		closeButtonLabel.position.set(-winWidth / 2 + 3, winHeight / 2, 2);
+		closeButtonLabel.scale.set(4, 3.5, 1);
+		threeGroup.add(closeButtonLabel);
+
+		// Minimize button
+		const minBtnGeom = new THREE.PlaneGeometry(3, 3);
+		const minBtnMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const minimizeButton = new THREE.Mesh(minBtnGeom, minBtnMat);
+		minimizeButton.position.set(-winWidth / 2 + 7, winHeight / 2, 1);
+		minimizeButton.userData = { isCompositeMinimizeButton: true, compositeId: group.id };
+		threeGroup.add(minimizeButton);
+
+		const minimizeButtonLabel = createButtonSprite('\u2014', false);
+		minimizeButtonLabel.position.set(-winWidth / 2 + 7, winHeight / 2, 2);
+		minimizeButtonLabel.scale.set(4, 3.5, 1);
+		threeGroup.add(minimizeButtonLabel);
+
+		// Look-inside button (eye icon)
+		const lookBtnGeom = new THREE.PlaneGeometry(6, 3);
+		const lookBtnMat = new THREE.MeshBasicMaterial({ color: 0x2a2118, transparent: true, opacity: 0.01, side: THREE.DoubleSide });
+		const lookInsideButton = new THREE.Mesh(lookBtnGeom, lookBtnMat);
+		lookInsideButton.position.set(winWidth / 2 - 6, winHeight / 2, 1);
+		lookInsideButton.userData = { isLookInsideButton: true, compositeId: group.id };
+		threeGroup.add(lookInsideButton);
+
+		const lookInsideLabel = createButtonSprite('\u25C9', group.lookInside);
+		lookInsideLabel.position.set(winWidth / 2 - 6, winHeight / 2, 2);
+		lookInsideLabel.scale.set(4, 3.5, 1);
+		threeGroup.add(lookInsideLabel);
+
+		// Get free states (unconstrained by internal wires)
+		const freeStates = algebraic.getCompositeFreeStateInfo(group.id);
+		const combinedNstates = freeStates.length;
+
+		// Time series visualization for FREE states only
+		const timeSeriesGroup = new THREE.Group();
+		timeSeriesGroup.position.set(0, -HEADER_HEIGHT / 2, 0);
+		timeSeriesGroup.visible = !group.lookInside;
+		threeGroup.add(timeSeriesGroup);
+
+		const timeSeriesLines: THREE.Line[] = [];
+		const timeSeriesGeometries: THREE.BufferGeometry[] = [];
+		const legendSprites: THREE.Sprite[] = [];
+
+		for (let fi = 0; fi < freeStates.length; fi++) {
+			const fs = freeStates[fi];
+			const tsGeom = new THREE.BufferGeometry();
+			const tsPos = new Float32Array(TIME_WINDOW_SAMPLES * 3);
+			tsGeom.setAttribute('position', new THREE.BufferAttribute(tsPos, 3));
+			tsGeom.setDrawRange(0, 0);
+			const stateColor = STATE_COLORS[fi % STATE_COLORS.length];
+			const tsMat = new THREE.LineBasicMaterial({ color: stateColor, transparent: true, opacity: 0.9 });
+			const tsLine = new THREE.Line(tsGeom, tsMat);
+			timeSeriesGroup.add(tsLine);
+			timeSeriesLines.push(tsLine);
+			timeSeriesGeometries.push(tsGeom);
+
+			const legend = createLegendSprite(fs.name, stateColor);
+			legend.position.set(winWidth / 2 - 5, winHeight / 2 - 4 - fi * 3, 1);
+			timeSeriesGroup.add(legend);
+			legendSprites.push(legend);
+		}
+
+		// Axis lines
+		const tsAxisGeom = new THREE.BufferGeometry();
+		const tsAxisPts = [
+			-winWidth / 2 + TS_MARGIN.left, -winHeight / 2 + TS_MARGIN.bottom, 0,
+			winWidth / 2 - TS_MARGIN.right, -winHeight / 2 + TS_MARGIN.bottom, 0,
+			-winWidth / 2 + TS_MARGIN.left, -winHeight / 2 + TS_MARGIN.bottom, 0,
+			-winWidth / 2 + TS_MARGIN.left, winHeight / 2 - TS_MARGIN.top, 0,
+		];
+		tsAxisGeom.setAttribute('position', new THREE.Float32BufferAttribute(tsAxisPts, 3));
+		const tsAxisMat = new THREE.LineBasicMaterial({ color: 0x3a2e24, transparent: true, opacity: 0.5 });
+		const tsAxisLines = new THREE.LineSegments(tsAxisGeom, tsAxisMat);
+		timeSeriesGroup.add(tsAxisLines);
+
+		const yTickSprite = createTickSprite(128, 512);
+		const cwInitYAxisH = winHeight - TS_MARGIN.bottom - TS_MARGIN.top;
+		const cwInitYScale = Math.min(40, cwInitYAxisH);
+		yTickSprite.scale.set(cwInitYScale * (128 / 512), cwInitYScale, 1);
+		yTickSprite.position.set(-winWidth / 2 + TS_MARGIN.left / 2, (TS_MARGIN.bottom - TS_MARGIN.top) / 2, 2);
+		timeSeriesGroup.add(yTickSprite);
+
+		const xTickSprite = createTickSprite(512, 64);
+		const cwInitXAxisW = winWidth - TS_MARGIN.left - TS_MARGIN.right;
+		const cwInitXScale = Math.min(40, cwInitXAxisW);
+		xTickSprite.scale.set(cwInitXScale, cwInitXScale * (64 / 512), 1);
+		xTickSprite.position.set((TS_MARGIN.left - TS_MARGIN.right) / 2, -winHeight / 2 + TS_MARGIN.bottom / 2 - 1, 2);
+		timeSeriesGroup.add(xTickSprite);
+
+		// Content group (for future phase view)
+		const contentGroup = new THREE.Group();
+		contentGroup.position.set(0, -HEADER_HEIGHT / 2, 0);
+		contentGroup.visible = false;
+		// TODO: subspace projection for >3D composite phase view
+		threeGroup.add(contentGroup);
+
+		scene.add(threeGroup);
+
+		return {
+			id: group.id,
+			group: threeGroup, border, header, headerLabel,
+			closeButton, closeButtonLabel,
+			minimizeButton, minimizeButtonLabel,
+			lookInsideButton, lookInsideLabel,
+			contentGroup, timeSeriesGroup,
+			timeSeriesLines, timeSeriesGeometries,
+			tsAxisLines, yTickSprite, xTickSprite,
+			legendSprites,
+			windowWidth: winWidth, windowHeight: winHeight,
+			lookInside: group.lookInside,
+			minimized: group.minimized,
+			combinedNstates,
+			memberWindowIds: [...group.memberSystemIds],
+			color,
+			tsYMin: Infinity, tsYMax: -Infinity,
+			freeStates,
+			ghostWires: [],
+			cachedName: group.name,
+			skeletonGroup: null,
+			compositePorts: []
+		};
+	}
+
+	function updateCompositeWindowBounds(cw: CompositeWindow) {
+		// Recompute bounding box from member positions
+		let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+		for (const memberId of cw.memberWindowIds) {
+			const win = systemWindows.get(memberId);
+			if (win) {
+				const gx = win.group.position.x;
+				const gy = win.group.position.y;
+				const halfW = win.windowWidth / 2;
+				const halfH = (win.windowHeight + HEADER_HEIGHT) / 2;
+				minX = Math.min(minX, gx - halfW);
+				maxX = Math.max(maxX, gx + halfW);
+				minY = Math.min(minY, gy - halfH);
+				maxY = Math.max(maxY, gy + halfH);
+			}
+		}
+		const padding = 8;
+		minX -= padding; maxX += padding;
+		minY -= padding; maxY += padding;
+		const newW = maxX - minX;
+		const newH = maxY - minY - HEADER_HEIGHT;
+		const cx = (minX + maxX) / 2;
+		const cy = (minY + maxY) / 2;
+
+		cw.group.position.set(cx, cy, -1);
+		cw.windowWidth = newW;
+		cw.windowHeight = newH;
+
+		// Update border (rounded corners)
+		cw.group.remove(cw.border);
+		cw.border.geometry.dispose();
+		(cw.border.material as THREE.Material).dispose();
+		const newCwBorderMat = new THREE.LineDashedMaterial({
+			color: 0x4d3d2e, dashSize: 2, gapSize: 1,
+			transparent: true, opacity: 0.6
+		});
+		cw.border = createRoundedRectBorder(newW, newH + HEADER_HEIGHT, CORNER_RADIUS, newCwBorderMat);
+		cw.group.add(cw.border);
+
+		// Update header (rounded top)
+		cw.header.geometry.dispose();
+		const newCwHeaderShape = createHeaderShape(newW, HEADER_HEIGHT, CORNER_RADIUS);
+		cw.header.geometry = new THREE.ShapeGeometry(newCwHeaderShape);
+		cw.header.position.set(0, newH / 2, 0);
+
+		cw.headerLabel.position.set(-newW / 2 + 16, newH / 2, 1);
+		cw.closeButton.position.set(-newW / 2 + 3, newH / 2, 1);
+		cw.closeButtonLabel.position.set(-newW / 2 + 3, newH / 2, 2);
+		cw.minimizeButton.position.set(-newW / 2 + 7, newH / 2, 1);
+		cw.minimizeButtonLabel.position.set(-newW / 2 + 7, newH / 2, 2);
+		cw.lookInsideButton.position.set(newW / 2 - 6, newH / 2, 1);
+		cw.lookInsideLabel.position.set(newW / 2 - 6, newH / 2, 2);
+	}
+
+	function updateCompositeTimeSeries(cw: CompositeWindow) {
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (!group) return;
+
+		const history = algebraic.getCompositeHistory(cw.id);
+		const timeHistory = algebraic.getCompositeTimeHistory(cw.id);
+		if (history.length === 0) return;
+
+		const startIdx = Math.max(0, history.length - TIME_WINDOW_SAMPLES);
+		const visibleHistory = history.slice(startIdx);
+		const visibleTimes = timeHistory.slice(startIdx);
+		const len = visibleHistory.length;
+		if (len === 0) return;
+
+		const startTime = visibleTimes.length > 0 ? visibleTimes[0] : 0;
+		const endTime = visibleTimes.length > 0 ? visibleTimes[visibleTimes.length - 1] : 0;
+
+		let frameMin = Infinity, frameMax = -Infinity;
+		for (const state of visibleHistory) {
+			for (let v = 0; v < cw.combinedNstates && v < state.length; v++) {
+				if (Number.isFinite(state[v])) {
+					frameMin = Math.min(frameMin, state[v]);
+					frameMax = Math.max(frameMax, state[v]);
+				}
+			}
+		}
+
+		if (frameMin < cw.tsYMin) cw.tsYMin = frameMin;
+		if (frameMax > cw.tsYMax) cw.tsYMax = frameMax;
+
+		const winW = cw.windowWidth;
+		const winH = cw.windowHeight;
+		const xMin = -winW / 2 + TS_MARGIN.left;
+		const xMax = winW / 2 - TS_MARGIN.right;
+		const yMin = -winH / 2 + TS_MARGIN.bottom;
+		const yMax = winH / 2 - TS_MARGIN.top;
+		const xRange = xMax - xMin;
+		const yRange = yMax - yMin;
+		const dataRange = cw.tsYMax - cw.tsYMin;
+
+		for (let v = 0; v < cw.combinedNstates && v < cw.timeSeriesGeometries.length; v++) {
+			const geometry = cw.timeSeriesGeometries[v];
+			const posArr = geometry.attributes.position.array as Float32Array;
+
+			for (let i = 0; i < len && i < TIME_WINDOW_SAMPLES; i++) {
+				const state = visibleHistory[i];
+				const value = v < state.length ? state[v] : 0;
+				const x = xMin + (i / (TIME_WINDOW_SAMPLES - 1)) * xRange;
+				const y = yMin + ((value - cw.tsYMin) / (dataRange > 0.001 ? dataRange : 1)) * yRange * 0.9 + yRange * 0.05;
+				posArr[i * 3] = x;
+				posArr[i * 3 + 1] = Number.isFinite(y) ? y : yMin;
+				posArr[i * 3 + 2] = 0;
+			}
+
+			geometry.attributes.position.needsUpdate = true;
+			geometry.setDrawRange(0, len);
+		}
+
+		updateYTickSprite(cw.yTickSprite, cw.tsYMin, cw.tsYMax, winW, winH);
+		updateXTickSprite(cw.xTickSprite, startTime, endTime, winW, winH);
+	}
+
+	function clearGhostWires(cw: CompositeWindow) {
+		for (const gw of cw.ghostWires) {
+			cw.group.remove(gw);
+			gw.geometry.dispose();
+			(gw.material as THREE.Material).dispose();
+		}
+		cw.ghostWires = [];
+	}
+
+	function rebuildGhostWires(cw: CompositeWindow) {
+		clearGhostWires(cw);
+		if (!cw.lookInside) return;
+
+		// For each member's unconnected input ports, draw a dashed line from the
+		// composite border edge to the inner port position.
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (!group) return;
+		const memberSet = new Set(group.memberSystemIds);
+
+		// Collect internally-connected input ports
+		const connectedInputs = new Set<string>();
+		for (const wire of algebraic.wireList) {
+			if (memberSet.has(wire.fromSystem) && memberSet.has(wire.toSystem)) {
+				connectedInputs.add(`${wire.toSystem}:${wire.toPort}`);
+			}
+		}
+
+		for (const memberId of group.memberSystemIds) {
+			const win = systemWindows.get(memberId);
+			if (!win) continue;
+			const sys = algebraic.systemList.find(s => s.id === memberId);
+			if (!sys) continue;
+
+			for (const port of win.inputPorts) {
+				// Skip internally connected ports and param inputs
+				if (connectedInputs.has(`${memberId}:${port.portIndex}`)) continue;
+				if (port.portIndex > sys.nstates) continue; // Only state inputs get ghost wires
+
+				// Port world position relative to composite group
+				const portWorldX = win.group.position.x + port.mesh.position.x;
+				const portWorldY = win.group.position.y + port.mesh.position.y;
+				// Composite local position
+				const localX = portWorldX - cw.group.position.x;
+				const localY = portWorldY - cw.group.position.y;
+				// Border left edge
+				const borderX = -cw.windowWidth / 2;
+
+				const geom = new THREE.BufferGeometry().setFromPoints([
+					new THREE.Vector3(borderX, localY, 3),
+					new THREE.Vector3(localX, localY, 3)
+				]);
+				const mat = new THREE.LineDashedMaterial({
+					color: 0x9a8b78, dashSize: 1, gapSize: 1,
+					transparent: true, opacity: 0.4
+				});
+				const line = new THREE.Line(geom, mat);
+				line.computeLineDistances();
+				cw.group.add(line);
+				cw.ghostWires.push(line);
+			}
+		}
+	}
+
+	// Rebuild the time series objects when free states change (membership or wiring change)
+	function rebuildCompositeTimeSeries(cw: CompositeWindow) {
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (!group) return;
+
+		// Clean up old time series
+		for (const geom of cw.timeSeriesGeometries) geom.dispose();
+		for (const line of cw.timeSeriesLines) {
+			cw.timeSeriesGroup.remove(line);
+			(line.material as THREE.Material).dispose();
+		}
+		for (const sprite of cw.legendSprites) {
+			cw.timeSeriesGroup.remove(sprite);
+			(sprite.material as THREE.SpriteMaterial).map?.dispose();
+			(sprite.material as THREE.Material).dispose();
+		}
+		cw.timeSeriesLines = [];
+		cw.timeSeriesGeometries = [];
+		cw.legendSprites = [];
+
+		// Rebuild with new free states
+		const freeStates = algebraic.getCompositeFreeStateInfo(group.id);
+		cw.freeStates = freeStates;
+		cw.combinedNstates = freeStates.length;
+		cw.tsYMin = Infinity;
+		cw.tsYMax = -Infinity;
+
+		const winWidth = cw.windowWidth;
+		const winHeight = cw.windowHeight;
+
+		for (let fi = 0; fi < freeStates.length; fi++) {
+			const fs = freeStates[fi];
+			const tsGeom = new THREE.BufferGeometry();
+			const tsPos = new Float32Array(TIME_WINDOW_SAMPLES * 3);
+			tsGeom.setAttribute('position', new THREE.BufferAttribute(tsPos, 3));
+			tsGeom.setDrawRange(0, 0);
+			const stateColor = STATE_COLORS[fi % STATE_COLORS.length];
+			const tsMat = new THREE.LineBasicMaterial({ color: stateColor, transparent: true, opacity: 0.9 });
+			const tsLine = new THREE.Line(tsGeom, tsMat);
+			cw.timeSeriesGroup.add(tsLine);
+			cw.timeSeriesLines.push(tsLine);
+			cw.timeSeriesGeometries.push(tsGeom);
+
+			const legend = createLegendSprite(fs.name, stateColor);
+			legend.position.set(winWidth / 2 - 5, winHeight / 2 - 4 - fi * 3, 1);
+			cw.timeSeriesGroup.add(legend);
+			cw.legendSprites.push(legend);
+		}
+	}
+
+	// Phase 5: Build skeleton overlay showing member boxes and internal wires
+	function buildSkeletonOverlay(cw: CompositeWindow) {
+		clearSkeletonOverlay(cw);
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (!group) return;
+
+		const skGroup = new THREE.Group();
+		skGroup.position.set(0, -HEADER_HEIGHT / 2, 1);
+
+		const members = group.memberSystemIds;
+		const boxW = 10, boxH = 7;
+		const cols = Math.max(1, Math.floor(cw.windowWidth / (boxW + 4)));
+		const startX = -((Math.min(members.length, cols) - 1) * (boxW + 4)) / 2;
+		const startY = (cw.windowHeight / 2 - HEADER_HEIGHT - 6);
+
+		const memberPositions = new Map<string, { x: number; y: number }>();
+
+		for (let i = 0; i < members.length; i++) {
+			const memberId = members[i];
+			const sys = algebraic.systemList.find(s => s.id === memberId);
+			if (!sys) continue;
+
+			const col = i % cols;
+			const row = Math.floor(i / cols);
+			const bx = startX + col * (boxW + 4);
+			const by = startY - row * (boxH + 3);
+
+			memberPositions.set(memberId, { x: bx, y: by });
+
+			// Small rounded box
+			const boxBorder = createRoundedRectBorder(boxW, boxH, 1.5,
+				new THREE.LineBasicMaterial({ color: 0x4d3d2e, transparent: true, opacity: 0.5 })
+			);
+			boxBorder.position.set(bx, by, 0);
+			skGroup.add(boxBorder);
+
+			// Label
+			const sysName = sys.templateId.split('_')[0];
+			const win = systemWindows.get(memberId);
+			const labelColor = win ? win.color : new THREE.Color(0x9a8b78);
+			const label = createTextSprite(sysName, labelColor);
+			label.scale.set(8, 2.5, 1);
+			label.position.set(bx, by, 1);
+			skGroup.add(label);
+		}
+
+		// Draw internal wire connections as thin lines between boxes
+		for (const wire of algebraic.wireList) {
+			if (group.internalWireIds.includes(wire.id)) {
+				const fromPos = memberPositions.get(wire.fromSystem);
+				const toPos = memberPositions.get(wire.toSystem);
+				if (fromPos && toPos) {
+					const geom = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(fromPos.x + boxW / 2, fromPos.y, 0.5),
+						new THREE.Vector3(toPos.x - boxW / 2, toPos.y, 0.5)
+					]);
+					const mat = new THREE.LineBasicMaterial({
+						color: 0x9a8b78, transparent: true, opacity: 0.3
+					});
+					skGroup.add(new THREE.Line(geom, mat));
+				}
+			}
+		}
+
+		cw.group.add(skGroup);
+		cw.skeletonGroup = skGroup;
+	}
+
+	function clearSkeletonOverlay(cw: CompositeWindow) {
+		if (!cw.skeletonGroup) return;
+		cw.group.remove(cw.skeletonGroup);
+		cw.skeletonGroup.traverse((child) => {
+			if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineLoop) {
+				child.geometry.dispose();
+				(child.material as THREE.Material).dispose();
+			} else if (child instanceof THREE.Sprite) {
+				(child.material as THREE.SpriteMaterial).map?.dispose();
+				(child.material as THREE.Material).dispose();
+			}
+		});
+		cw.skeletonGroup = null;
+	}
+
+	// Phase 6: Build composite ports on the outer box border
+	function buildCompositePorts(cw: CompositeWindow) {
+		clearCompositePorts(cw);
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (!group) return;
+
+		const memberSet = new Set(group.memberSystemIds);
+		// Collect internally connected ports
+		const internalInputs = new Set<string>();
+		const internalOutputs = new Set<string>();
+		for (const wire of algebraic.wireList) {
+			if (memberSet.has(wire.fromSystem) && memberSet.has(wire.toSystem)) {
+				internalInputs.add(`${wire.toSystem}:${wire.toPort}`);
+				internalOutputs.add(`${wire.fromSystem}:${wire.fromPort}`);
+			}
+		}
+
+		const externalInputs: { memberId: string; portIndex: number; color: THREE.Color }[] = [];
+		const externalOutputs: { memberId: string; portIndex: number; color: THREE.Color }[] = [];
+
+		for (const memberId of group.memberSystemIds) {
+			const sys = algebraic.systemList.find(s => s.id === memberId);
+			const win = systemWindows.get(memberId);
+			if (!sys || !win) continue;
+
+			// External inputs: not connected internally
+			for (const port of win.inputPorts) {
+				if (port.portIndex > sys.nstates) continue; // Only state inputs
+				if (!internalInputs.has(`${memberId}:${port.portIndex}`)) {
+					externalInputs.push({ memberId, portIndex: port.portIndex, color: win.color });
+				}
+			}
+
+			// External outputs: not connected internally
+			for (const port of win.outputPorts) {
+				if (!internalOutputs.has(`${memberId}:${port.portIndex}`)) {
+					externalOutputs.push({ memberId, portIndex: port.portIndex, color: win.color });
+				}
+			}
+		}
+
+		const contentTop = cw.windowHeight / 2 - HEADER_HEIGHT;
+		const contentBottom = -cw.windowHeight / 2;
+		const contentHeight = contentTop - contentBottom;
+
+		// Place external inputs on left border
+		for (let i = 0; i < externalInputs.length; i++) {
+			const ei = externalInputs[i];
+			const t = (i + 1) / (externalInputs.length + 1);
+			const yPos = contentBottom + t * contentHeight;
+			const port = createPortDot(
+				ei.memberId, ei.portIndex, false,
+				`in${ei.portIndex}`, ei.color,
+				-cw.windowWidth / 2, yPos
+			);
+			cw.group.add(port.mesh);
+			cw.group.add(port.ring);
+			cw.group.add(port.hitArea);
+			cw.group.add(port.label);
+			cw.compositePorts.push({
+				memberSystemId: ei.memberId,
+				portIndex: ei.portIndex,
+				isOutput: false,
+				mesh: port.mesh,
+				ring: port.ring,
+				hitArea: port.hitArea,
+				label: port.label
+			});
+		}
+
+		// Place external outputs on right border
+		for (let i = 0; i < externalOutputs.length; i++) {
+			const eo = externalOutputs[i];
+			const t = (i + 1) / (externalOutputs.length + 1);
+			const yPos = contentBottom + t * contentHeight;
+			const port = createPortDot(
+				eo.memberId, eo.portIndex, true,
+				`out${eo.portIndex}`, eo.color,
+				cw.windowWidth / 2, yPos
+			);
+			cw.group.add(port.mesh);
+			cw.group.add(port.ring);
+			cw.group.add(port.hitArea);
+			cw.group.add(port.label);
+			cw.compositePorts.push({
+				memberSystemId: eo.memberId,
+				portIndex: eo.portIndex,
+				isOutput: true,
+				mesh: port.mesh,
+				ring: port.ring,
+				hitArea: port.hitArea,
+				label: port.label
+			});
+		}
+	}
+
+	function clearCompositePorts(cw: CompositeWindow) {
+		for (const cp of cw.compositePorts) {
+			cw.group.remove(cp.mesh);
+			cw.group.remove(cp.ring);
+			cw.group.remove(cp.hitArea);
+			cw.group.remove(cp.label);
+			cp.mesh.geometry.dispose();
+			(cp.mesh.material as THREE.Material).dispose();
+			cp.ring.geometry.dispose();
+			(cp.ring.material as THREE.Material).dispose();
+			cp.hitArea.geometry.dispose();
+			(cp.hitArea.material as THREE.Material).dispose();
+			(cp.label.material as THREE.SpriteMaterial).map?.dispose();
+			(cp.label.material as THREE.Material).dispose();
+		}
+		cw.compositePorts = [];
+	}
+
+	function removeCompositeWindow(id: string) {
+		const cw = compositeWindows.get(id);
+		if (!cw) return;
+
+		clearGhostWires(cw);
+		clearSkeletonOverlay(cw);
+		clearCompositePorts(cw);
+		scene.remove(cw.group);
+		// Dispose geometries and materials
+		cw.border.geometry.dispose();
+		(cw.border.material as THREE.Material).dispose();
+		cw.header.geometry.dispose();
+		(cw.header.material as THREE.Material).dispose();
+		(cw.headerLabel.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.headerLabel.material as THREE.Material).dispose();
+		cw.closeButton.geometry.dispose();
+		(cw.closeButton.material as THREE.Material).dispose();
+		(cw.closeButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.closeButtonLabel.material as THREE.Material).dispose();
+		cw.minimizeButton.geometry.dispose();
+		(cw.minimizeButton.material as THREE.Material).dispose();
+		(cw.minimizeButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.minimizeButtonLabel.material as THREE.Material).dispose();
+		cw.lookInsideButton.geometry.dispose();
+		(cw.lookInsideButton.material as THREE.Material).dispose();
+		(cw.lookInsideLabel.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.lookInsideLabel.material as THREE.Material).dispose();
+		for (const geom of cw.timeSeriesGeometries) geom.dispose();
+		for (const line of cw.timeSeriesLines) (line.material as THREE.Material).dispose();
+		for (const sprite of cw.legendSprites) {
+			(sprite.material as THREE.SpriteMaterial).map?.dispose();
+			(sprite.material as THREE.Material).dispose();
+		}
+		cw.tsAxisLines.geometry.dispose();
+		(cw.tsAxisLines.material as THREE.Material).dispose();
+		(cw.yTickSprite.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.yTickSprite.material as THREE.Material).dispose();
+		(cw.xTickSprite.material as THREE.SpriteMaterial).map?.dispose();
+		(cw.xTickSprite.material as THREE.Material).dispose();
+
+		// Restore member opacity
+		for (const memberId of cw.memberWindowIds) {
+			const win = systemWindows.get(memberId);
+			if (win) restoreGroupOpacity(win.group);
+		}
+
+		compositeWindows.delete(id);
+	}
+
+	function toggleLookInside(cw: CompositeWindow) {
+		cw.lookInside = !cw.lookInside;
+
+		// Also update the store's group state so it persists across $effect cycles
+		const group = algebraic.compositeGroups.find(g => g.id === cw.id);
+		if (group) {
+			group.lookInside = cw.lookInside;
+		}
+
+		if (cw.lookInside) {
+			// Enter look-inside mode: show inner systems, hide skeleton + outer time series
+			cw.timeSeriesGroup.visible = false;
+			cw.contentGroup.visible = false;
+			clearSkeletonOverlay(cw);
+			// Restore member systems to full opacity
+			for (const memberId of cw.memberWindowIds) {
+				const win = systemWindows.get(memberId);
+				if (win) restoreGroupOpacity(win.group);
+			}
+			// Internal wires full opacity
+			for (const wire of algebraic.wireList) {
+				if (algebraic.isInternalWire(wire.id)) {
+					const wv = wireVisuals.get(wire.id);
+					if (wv) {
+						(wv.line.material as THREE.LineBasicMaterial).opacity = 0.7;
+						(wv.valueLine.material as THREE.LineBasicMaterial).opacity = 0.4;
+					}
+				}
+			}
+			// Build ghost wires
+			rebuildGhostWires(cw);
+			// Hide composite ports
+			for (const cp of cw.compositePorts) {
+				cp.mesh.visible = false;
+				cp.ring.visible = false;
+				cp.hitArea.visible = false;
+				cp.label.visible = false;
+			}
+		} else {
+			// Exit look-inside mode: skeleton view + time series, hide members completely
+			cw.timeSeriesGroup.visible = true;
+			// Hide members completely (not dim)
+			for (const memberId of cw.memberWindowIds) {
+				const win = systemWindows.get(memberId);
+				if (win) setGroupOpacity(win.group, 0);
+			}
+			// Internal wires hidden
+			for (const wire of algebraic.wireList) {
+				if (algebraic.isInternalWire(wire.id)) {
+					const wv = wireVisuals.get(wire.id);
+					if (wv) {
+						(wv.line.material as THREE.LineBasicMaterial).opacity = 0;
+						(wv.valueLine.material as THREE.LineBasicMaterial).opacity = 0;
+					}
+				}
+			}
+			// Remove ghost wires, build skeleton
+			clearGhostWires(cw);
+			buildSkeletonOverlay(cw);
+			// Show composite ports
+			for (const cp of cw.compositePorts) {
+				cp.mesh.visible = true;
+				cp.ring.visible = true;
+				cp.hitArea.visible = true;
+				cp.label.visible = true;
+			}
+		}
+
+		// Update button label
+		const oldLabel = cw.lookInsideLabel;
+		const newLabel = createButtonSprite('\u25C9', cw.lookInside);
+		newLabel.position.copy(oldLabel.position);
+		newLabel.scale.set(4, 3.5, 1);
+		cw.group.remove(oldLabel);
+		cw.group.add(newLabel);
+		(oldLabel.material as THREE.SpriteMaterial).map?.dispose();
+		(oldLabel.material as THREE.Material).dispose();
+		cw.lookInsideLabel = newLabel;
+	}
+
 	function updateSystemWindow(id: string, sys: SystemState) {
 		const win = getOrCreateWindow(id, sys);
 		const history = algebraic.getHistory(id);
 
-		updateBounds(win, sys.state);
-
 		if (history.length === 0) return;
+
+		// Minimized: update state value sprites at reduced rate
+		if (win.minimized) {
+			const now = performance.now();
+			if (now - win.lastMinimizedUpdate > 100) {
+				win.lastMinimizedUpdate = now;
+				const tmpl = algebraic.templateList.find(t => t.id === sys.templateId);
+				const stateNames = tmpl?.state_names ?? STATE_NAMES;
+				for (let i = 0; i < win.stateValueSprites.length && i < sys.state.length; i++) {
+					const name = stateNames[i] || `v${i}`;
+					updateMinimizedValueSprite(win.stateValueSprites[i], `${name} = ${sys.state[i]?.toFixed(3) ?? '0'}`);
+				}
+			}
+			return;
+		}
+
+		recomputeBounds(win, history, sys.state);
 
 		const winW = win.windowWidth;
 		const winH = win.windowHeight;
 
 		if (win.viewMode === 'phase') {
 			// === Phase Space View ===
-			const len = Math.min(history.length, MAX_POINTS);
+			const phaseHistory = history.filter((state) => isFiniteState(state, sys.nstates));
+			const len = Math.min(phaseHistory.length, MAX_POINTS);
+			if (len === 0) return;
 			const localPos = mapStateToLocal(sys.state, win, sys.nstates);
 			win.point.position.copy(localPos);
 
@@ -1427,7 +2707,7 @@
 			const trailColors = win.trailGeometry.attributes.color.array as Float32Array;
 
 			for (let i = 0; i < len; i++) {
-				const state = history[i];
+				const state = phaseHistory[phaseHistory.length - len + i];
 				const pos = mapStateToLocal(state, win, sys.nstates);
 
 				positions[i * 3] = pos.x;
@@ -1551,6 +2831,33 @@
 			win.editButton.geometry.dispose();
 			(win.editButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
 			(win.editButtonLabel.material as THREE.Material).dispose();
+			(win.closeButton.material as THREE.Material).dispose();
+			win.closeButton.geometry.dispose();
+			(win.closeButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
+			(win.closeButtonLabel.material as THREE.Material).dispose();
+			(win.minimizeButton.material as THREE.Material).dispose();
+			win.minimizeButton.geometry.dispose();
+			(win.minimizeButtonLabel.material as THREE.SpriteMaterial).map?.dispose();
+			(win.minimizeButtonLabel.material as THREE.Material).dispose();
+			// Dispose minimized sprites
+			for (const s of win.stateValueSprites) {
+				(s.material as THREE.SpriteMaterial).map?.dispose();
+				(s.material as THREE.Material).dispose();
+			}
+			for (const s of win.paramValueSprites) {
+				(s.material as THREE.SpriteMaterial).map?.dispose();
+				(s.material as THREE.Material).dispose();
+			}
+			if (win.caretButton) {
+				(win.caretButton.material as THREE.Material).dispose();
+				win.caretButton.geometry.dispose();
+			}
+			if (win.caretLabel) {
+				(win.caretLabel.material as THREE.SpriteMaterial).map?.dispose();
+				(win.caretLabel.material as THREE.Material).dispose();
+			}
+			// Reset close confirm if this system is being confirmed
+			if (closeConfirmId === id) resetCloseConfirm();
 			win.border.geometry.dispose();
 			(win.border.material as THREE.Material).dispose();
 			win.tsAxisLines.geometry.dispose();
@@ -1619,6 +2926,8 @@
 		updateMousePosition(event);
 		raycaster.setFromCamera(mouse, camera);
 
+		const closeButtons: THREE.Mesh[] = [];
+		const minimizeButtons: THREE.Mesh[] = [];
 		const phaseButtons: THREE.Mesh[] = [];
 		const timeButtons: THREE.Mesh[] = [];
 		const viewCycleButtons: THREE.Mesh[] = [];
@@ -1626,12 +2935,149 @@
 		const resizeHandles: THREE.Mesh[] = [];
 		const headers: THREE.Mesh[] = [];
 		for (const win of systemWindows.values()) {
+			closeButtons.push(win.closeButton);
+			minimizeButtons.push(win.minimizeButton);
 			phaseButtons.push(win.phaseButton);
 			timeButtons.push(win.timeButton);
 			if (win.viewCycleButton.visible) viewCycleButtons.push(win.viewCycleButton);
 			editButtons.push(win.editButton);
 			resizeHandles.push(win.resizeHandle);
 			headers.push(win.header);
+		}
+
+		// Close button (confirm-to-delete)
+		const closeIntersects = raycaster.intersectObjects(closeButtons);
+		if (closeIntersects.length > 0) {
+			const button = closeIntersects[0].object as THREE.Mesh;
+			const systemId = button.userData.systemId;
+			if (closeConfirmId === systemId) {
+				// Second click — delete
+				algebraic.removeSystem(systemId);
+				resetCloseConfirm();
+			} else {
+				// First click — show confirm tooltip
+				resetCloseConfirm();
+				closeConfirmId = systemId;
+				const win = systemWindows.get(systemId);
+				if (win) {
+					closeConfirmWindow = win;
+					closeConfirmTooltip = createTooltipSprite('click again to remove', '#b85c4a');
+					closeConfirmTooltip.position.set(-win.windowWidth / 2 + 16, win.windowHeight / 2 + 3, 3);
+					win.group.add(closeConfirmTooltip);
+					closeConfirmTimer = setTimeout(resetCloseConfirm, 2000);
+				}
+			}
+			return;
+		}
+
+		// Minimize button
+		const minimizeIntersects = raycaster.intersectObjects(minimizeButtons);
+		if (minimizeIntersects.length > 0) {
+			const button = minimizeIntersects[0].object as THREE.Mesh;
+			const systemId = button.userData.systemId;
+			const win = systemWindows.get(systemId);
+			if (win) {
+				const sys = algebraic.systemList.find(s => s.id === systemId);
+				if (win.minimized) {
+					restoreWindow(win);
+				} else if (sys) {
+					minimizeWindow(win, sys);
+				}
+			}
+			return;
+		}
+
+		// Composite buttons (close, minimize, look-inside, drag header)
+		const compositeCloseButtons: THREE.Mesh[] = [];
+		const compositeMinButtons: THREE.Mesh[] = [];
+		const compositeLookButtons: THREE.Mesh[] = [];
+		const compositeHeaders: THREE.Mesh[] = [];
+		for (const cw of compositeWindows.values()) {
+			compositeCloseButtons.push(cw.closeButton);
+			compositeMinButtons.push(cw.minimizeButton);
+			compositeLookButtons.push(cw.lookInsideButton);
+			compositeHeaders.push(cw.header);
+		}
+
+		const compCloseIntersects = raycaster.intersectObjects(compositeCloseButtons);
+		if (compCloseIntersects.length > 0) {
+			const button = compCloseIntersects[0].object as THREE.Mesh;
+			const compositeId = button.userData.compositeId;
+			const group = algebraic.compositeGroups.find(g => g.id === compositeId);
+			if (group) {
+				const cw = compositeWindows.get(compositeId);
+				if (closeConfirmId === compositeId) {
+					// Second click — delete all members
+					for (const memberId of group.memberSystemIds) {
+						algebraic.removeSystem(memberId);
+					}
+					resetCloseConfirm();
+				} else {
+					// First click — show confirm tooltip
+					resetCloseConfirm();
+					closeConfirmId = compositeId;
+					if (cw) {
+						closeConfirmGroup = cw.group;
+						const n = group.memberSystemIds.length;
+						closeConfirmTooltip = createTooltipSprite(`click again to remove ${n} systems`, '#b85c4a');
+						closeConfirmTooltip.position.set(-cw.windowWidth / 2 + 20, cw.windowHeight / 2 + 3, 3);
+						cw.group.add(closeConfirmTooltip);
+						closeConfirmTimer = setTimeout(resetCloseConfirm, 2000);
+					}
+				}
+			}
+			return;
+		}
+
+		const compLookIntersects = raycaster.intersectObjects(compositeLookButtons);
+		if (compLookIntersects.length > 0) {
+			const button = compLookIntersects[0].object as THREE.Mesh;
+			const compositeId = button.userData.compositeId;
+			const cw = compositeWindows.get(compositeId);
+			if (cw) toggleLookInside(cw);
+			return;
+		}
+
+		const compHeaderIntersects = raycaster.intersectObjects(compositeHeaders);
+		if (compHeaderIntersects.length > 0) {
+			const header = compHeaderIntersects[0].object as THREE.Mesh;
+			const compositeId = header.userData.compositeId;
+			const cw = compositeWindows.get(compositeId);
+			if (cw) {
+				// Drag all members together
+				isDragging = true;
+				// Use first member window as drag proxy — we'll handle multi-drag in onMouseMove
+				draggedWindow = null;
+				dragStart.set(event.clientX, event.clientY);
+				// Store composite drag state
+				(cw as any)._dragging = true;
+				(cw as any)._dragStartPositions = new Map(
+					cw.memberWindowIds.map(id => {
+						const win = systemWindows.get(id);
+						return [id, { x: win?.group.position.x ?? 0, y: win?.group.position.y ?? 0 }];
+					})
+				);
+				windowStartPos.set(cw.group.position.x, cw.group.position.y);
+				canvasEl.style.cursor = 'grabbing';
+			}
+			return;
+		}
+
+		// Caret button (params expand/collapse in minimized view)
+		const caretButtons: THREE.Mesh[] = [];
+		for (const win of systemWindows.values()) {
+			if (win.caretButton) caretButtons.push(win.caretButton);
+		}
+		const caretIntersects = raycaster.intersectObjects(caretButtons);
+		if (caretIntersects.length > 0) {
+			const button = caretIntersects[0].object as THREE.Mesh;
+			const systemId = button.userData.systemId;
+			const win = systemWindows.get(systemId);
+			const sys = algebraic.systemList.find(s => s.id === systemId);
+			if (win && sys) {
+				toggleParamsExpanded(win, sys);
+			}
+			return;
 		}
 
 		// Edit button
@@ -1689,6 +3135,7 @@
 				if (port) {
 					isWiring = true;
 					wireSourcePort = port;
+					pendingRewire = null;
 					lastWireDragTime = 0;
 					// Create drag line with pre-allocated vertices for pathfinding
 					const dragGeom = new THREE.BufferGeometry();
@@ -1716,15 +3163,10 @@
 				if (fromWin) {
 					const fromPort = fromWin.outputPorts.find(p => p.portIndex === connectedWire.fromPort);
 					if (fromPort) {
-						// Preserve state before unwiring
-						const targetSys = algebraic.systemList.find(s => s.id === connectedWire.toSystem);
-						if (targetSys) {
-							algebraic.setState(connectedWire.toSystem, [...targetSys.state]);
-						}
-						algebraic.unwire(connectedWire.id);
 						// Start new wire drag
 						isWiring = true;
 						wireSourcePort = fromPort;
+						pendingRewire = connectedWire;
 						lastWireDragTime = 0;
 						const dragGeom = new THREE.BufferGeometry();
 						dragGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(WIRE_DRAG_MAX_VERTS * 3), 3));
@@ -1823,7 +3265,8 @@
 						h: win.windowHeight + HEADER_HEIGHT
 					});
 				}
-				const route = computeWireRoute(fromPos, worldPos, obstacles);
+				const rawRoute = computeWireRoute(fromPos, worldPos, obstacles);
+				const route = smoothWirePath(rawRoute);
 				const nVerts = Math.min(route.length, WIRE_DRAG_MAX_VERTS);
 				for (let i = 0; i < nVerts; i++) {
 					positions[i * 3] = route[i].x;
@@ -1945,9 +3388,34 @@
 			draggedWindow.group.position.x = windowStartPos.x + deltaWorldX;
 			draggedWindow.group.position.y = windowStartPos.y + deltaWorldY;
 			updateClipPlanes(draggedWindow);
+		} else if (isDragging && !draggedWindow) {
+			// Composite drag: move all members
+			const currentScreen = new THREE.Vector2(event.clientX, event.clientY);
+			const deltaScreen = currentScreen.clone().sub(dragStart);
+			const viewWidth = camera.right - camera.left;
+			const viewHeight = camera.top - camera.bottom;
+			const rect = canvasEl.getBoundingClientRect();
+			const deltaWorldX = (deltaScreen.x / rect.width) * viewWidth;
+			const deltaWorldY = -(deltaScreen.y / rect.height) * viewHeight;
+
+			for (const cw of compositeWindows.values()) {
+				if ((cw as any)._dragging) {
+					const startPositions = (cw as any)._dragStartPositions as Map<string, { x: number; y: number }>;
+					for (const [memberId, startPos] of startPositions) {
+						const win = systemWindows.get(memberId);
+						if (win) {
+							win.group.position.x = startPos.x + deltaWorldX;
+							win.group.position.y = startPos.y + deltaWorldY;
+							updateClipPlanes(win);
+						}
+					}
+				}
+			}
 		} else {
 			raycaster.setFromCamera(mouse, camera);
 
+			const closeButtons: THREE.Mesh[] = [];
+			const minimizeButtons: THREE.Mesh[] = [];
 			const phaseButtons: THREE.Mesh[] = [];
 			const timeButtons: THREE.Mesh[] = [];
 			const viewCycleButtons: THREE.Mesh[] = [];
@@ -1955,6 +3423,8 @@
 			const resizeHandles: THREE.Mesh[] = [];
 			const headers: THREE.Mesh[] = [];
 			for (const win of systemWindows.values()) {
+				closeButtons.push(win.closeButton);
+				minimizeButtons.push(win.minimizeButton);
 				phaseButtons.push(win.phaseButton);
 				timeButtons.push(win.timeButton);
 				if (win.viewCycleButton.visible) viewCycleButtons.push(win.viewCycleButton);
@@ -1963,11 +3433,13 @@
 				headers.push(win.header);
 			}
 
+			const closeIntersects = raycaster.intersectObjects(closeButtons);
+			const minimizeIntersects = raycaster.intersectObjects(minimizeButtons);
 			const phaseIntersects = raycaster.intersectObjects(phaseButtons);
 			const timeIntersects = raycaster.intersectObjects(timeButtons);
 			const viewCycleIntersects = raycaster.intersectObjects(viewCycleButtons);
 			const editIntersects = raycaster.intersectObjects(editButtons);
-			if (phaseIntersects.length > 0 || timeIntersects.length > 0 || viewCycleIntersects.length > 0 || editIntersects.length > 0) {
+			if (closeIntersects.length > 0 || minimizeIntersects.length > 0 || phaseIntersects.length > 0 || timeIntersects.length > 0 || viewCycleIntersects.length > 0 || editIntersects.length > 0) {
 				canvasEl.style.cursor = 'pointer';
 				return;
 			}
@@ -1975,6 +3447,24 @@
 			const resizeIntersects = raycaster.intersectObjects(resizeHandles);
 			if (resizeIntersects.length > 0) {
 				canvasEl.style.cursor = 'nwse-resize';
+				return;
+			}
+
+			// Composite button hover
+			const compButtons: THREE.Mesh[] = [];
+			const compHeaders: THREE.Mesh[] = [];
+			for (const cw of compositeWindows.values()) {
+				compButtons.push(cw.closeButton, cw.minimizeButton, cw.lookInsideButton);
+				compHeaders.push(cw.header);
+			}
+			const compBtnIntersects = raycaster.intersectObjects(compButtons);
+			if (compBtnIntersects.length > 0) {
+				canvasEl.style.cursor = 'pointer';
+				return;
+			}
+			const compHeaderIntersects = raycaster.intersectObjects(compHeaders);
+			if (compHeaderIntersects.length > 0) {
+				canvasEl.style.cursor = 'grab';
 				return;
 			}
 
@@ -2002,12 +3492,37 @@
 			if (inIntersects.length > 0) {
 				const hit = inIntersects[0].object as THREE.Mesh;
 				const { systemId, portIndex } = hit.userData;
-				// Replace existing wire to this input if any
-				const existingWire = algebraic.wireList.find(w => w.toSystem === systemId && w.toPort === portIndex);
-				if (existingWire) {
-					algebraic.unwire(existingWire.id);
+				const sameAsOriginal = pendingRewire &&
+					pendingRewire.toSystem === systemId &&
+					pendingRewire.toPort === portIndex;
+
+				if (!sameAsOriginal) {
+					// Preserve destination system state before mutating wiring.
+					const rewire = pendingRewire;
+					if (rewire) {
+						const targetSys = algebraic.systemList.find(s => s.id === rewire.toSystem);
+						if (targetSys) {
+							algebraic.setState(rewire.toSystem, [...targetSys.state]);
+						}
+						algebraic.unwire(rewire.id);
+					}
+
+					// Replace existing wire to this input if any (except the one we're rewiring).
+					const existingWire = algebraic.wireList.find(w => w.toSystem === systemId && w.toPort === portIndex);
+					if (existingWire && (!rewire || existingWire.id !== rewire.id)) {
+						algebraic.unwire(existingWire.id);
+					}
+
+					algebraic.wire(wireSourcePort.systemId, wireSourcePort.portIndex, systemId, portIndex);
 				}
-				algebraic.wire(wireSourcePort.systemId, wireSourcePort.portIndex, systemId, portIndex);
+			} else if (pendingRewire) {
+				// Releasing outside any valid input intentionally drops the wire.
+				const rewire = pendingRewire;
+				const targetSys = algebraic.systemList.find(s => s.id === rewire.toSystem);
+				if (targetSys) {
+					algebraic.setState(rewire.toSystem, [...targetSys.state]);
+				}
+				algebraic.unwire(rewire.id);
 			}
 
 			// Clean up drag line
@@ -2019,6 +3534,7 @@
 			}
 			isWiring = false;
 			wireSourcePort = null;
+			pendingRewire = null;
 
 			// Reset input port highlights
 			for (const win of systemWindows.values()) {
@@ -2034,6 +3550,11 @@
 
 		if (draggedWindow && isDragging) {
 			draggedWindow.group.position.z = 0;
+		}
+		// Clean up composite drag state
+		for (const cw of compositeWindows.values()) {
+			delete (cw as any)._dragging;
+			delete (cw as any)._dragStartPositions;
 		}
 		isDragging = false;
 		isResizing = false;
@@ -2093,6 +3614,110 @@
 
 		// B7: Sync wire visuals with store
 		syncWireVisuals();
+
+		// Sync composite windows
+		const composites = algebraic.compositeGroups;
+		const currentCompositeIds = new Set(composites.map(g => g.id));
+
+		// Remove dissolved composites
+		for (const [id] of compositeWindows) {
+			if (!currentCompositeIds.has(id)) {
+				removeCompositeWindow(id);
+			}
+		}
+
+		// Create/update composite windows
+		for (const group of composites) {
+			let cw = compositeWindows.get(group.id);
+			if (!cw) {
+				cw = createCompositeWindow(group);
+				compositeWindows.set(group.id, cw);
+			}
+
+			// Detect membership or name change — need to rebuild time series
+			const oldMembers = cw.memberWindowIds.join(',');
+			const newMembers = group.memberSystemIds.join(',');
+			const membershipChanged = oldMembers !== newMembers;
+
+			cw.memberWindowIds = [...group.memberSystemIds];
+
+			// Update header label if name changed
+			if (cw.cachedName !== group.name) {
+				cw.cachedName = group.name;
+				const oldLabel = cw.headerLabel;
+				const newLabel = createTextSprite(group.name, cw.color);
+				newLabel.position.copy(oldLabel.position);
+				cw.group.remove(oldLabel);
+				cw.group.add(newLabel);
+				(oldLabel.material as THREE.SpriteMaterial).map?.dispose();
+				(oldLabel.material as THREE.Material).dispose();
+				cw.headerLabel = newLabel;
+			}
+
+			// Recompute bounds from member positions
+			updateCompositeWindowBounds(cw);
+
+			// Rebuild time series if membership or wiring changed
+			const newFreeStates = algebraic.getCompositeFreeStateInfo(group.id);
+			const freeStatesKey = newFreeStates.map(fs => `${fs.systemId}:${fs.stateIndex}`).join(',');
+			const oldFreeStatesKey = cw.freeStates.map(fs => `${fs.systemId}:${fs.stateIndex}`).join(',');
+			if (membershipChanged || freeStatesKey !== oldFreeStatesKey) {
+				rebuildCompositeTimeSeries(cw);
+			}
+
+			// Update time series if not look-inside
+			if (!cw.lookInside) {
+				updateCompositeTimeSeries(cw);
+			}
+
+			// Rebuild ghost wires (they depend on wiring and positions)
+			rebuildGhostWires(cw);
+
+			// Apply member opacity & skeleton/ports based on look-inside state
+			for (const memberId of cw.memberWindowIds) {
+				const win = systemWindows.get(memberId);
+				if (win) {
+					if (cw.lookInside) {
+						restoreGroupOpacity(win.group);
+					} else {
+						setGroupOpacity(win.group, 0);
+					}
+				}
+			}
+			// Internal wire opacity
+			for (const wireId of group.internalWireIds) {
+				const wv = wireVisuals.get(wireId);
+				if (wv) {
+					(wv.line.material as THREE.LineBasicMaterial).opacity = cw.lookInside ? 0.7 : 0;
+					(wv.valueLine.material as THREE.LineBasicMaterial).opacity = cw.lookInside ? 0.4 : 0;
+				}
+			}
+			// Phase 5: Skeleton overlay when not looking inside
+			if (!cw.lookInside) {
+				buildSkeletonOverlay(cw);
+			} else {
+				clearSkeletonOverlay(cw);
+			}
+			// Phase 6: Composite ports
+			buildCompositePorts(cw);
+			// Hide composite ports when in look-inside mode
+			if (cw.lookInside) {
+				for (const cp of cw.compositePorts) {
+					cp.mesh.visible = false;
+					cp.ring.visible = false;
+					cp.hitArea.visible = false;
+					cp.label.visible = false;
+				}
+			}
+		}
+
+		// Restore opacity for systems not in any composite
+		for (const [sysId, win] of systemWindows) {
+			const inComposite = composites.some(g => g.memberSystemIds.includes(sysId));
+			if (!inComposite) {
+				restoreGroupOpacity(win.group);
+			}
+		}
 	});
 
 	// React to size changes
@@ -2107,8 +3732,15 @@
 	});
 
 	onMount(() => {
+		// Gate on font loading so canvas textures render with CMU Serif.
+		// Start init immediately but re-render text once fonts load.
 		initScene();
 		animate();
+		Promise.all([
+			document.fonts.load(`400 16px ${CANVAS_FONT}`),
+			document.fonts.load(`700 16px ${CANVAS_FONT}`),
+			document.fonts.load(`italic 16px ${CANVAS_FONT}`)
+		]).catch(() => { /* font fallback is acceptable */ });
 
 		return () => {
 			cancelAnimationFrame(animationId);
@@ -2134,6 +3766,9 @@
 				wireDragLine = null;
 			}
 			renderer.dispose();
+			for (const id of compositeWindows.keys()) {
+				removeCompositeWindow(id);
+			}
 			for (const id of systemWindows.keys()) {
 				removeSystemWindow(id);
 			}
@@ -2193,10 +3828,11 @@
 		position: absolute;
 		background: #1a1410;
 		border: 1px solid #c9a84c;
+		border-radius: 4px;
 		padding: 0.5rem;
 		min-width: 160px;
 		z-index: 10;
-		font-family: monospace;
+		font-family: 'CMU Serif', serif;
 		font-size: 0.75rem;
 		color: #d4c5a0;
 	}

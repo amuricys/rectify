@@ -4,6 +4,53 @@ using AlgebraicDynamics.DWDDynam: eval_dynamics, readout, ninputs
 
 export step!, step_composed!, euler_step, rk4_step
 export step_world!, step_world_independent!
+export NonFiniteSimulationError
+
+# =============================================================================
+# Numeric Diagnostics
+# =============================================================================
+
+struct NonFiniteSimulationError <: Exception
+    stage::String
+    system_id::String
+    time::Float64
+    dt::Float64
+    indices::Vector{Int}
+    values::Vector{Float64}
+end
+
+function Base.showerror(io::IO, e::NonFiniteSimulationError)
+    print(
+        io,
+        "Non-finite values detected during ", e.stage,
+        " for ", e.system_id,
+        " at t=", e.time, " dt=", e.dt,
+        " indices=", e.indices,
+        " values=", e.values
+    )
+end
+
+function find_nonfinite(v::Vector{Float64}; max_items::Int=8)
+    idx = Int[]
+    vals = Float64[]
+    for i in eachindex(v)
+        if !isfinite(v[i])
+            push!(idx, i)
+            push!(vals, v[i])
+            if length(idx) >= max_items
+                break
+            end
+        end
+    end
+    return idx, vals
+end
+
+function throw_if_nonfinite(stage::String, system_id::String, v::Vector{Float64}, t::Float64, dt::Float64)
+    idx, vals = find_nonfinite(v)
+    if !isempty(idx)
+        throw(NonFiniteSimulationError(stage, system_id, t, dt, idx, vals))
+    end
+end
 
 # =============================================================================
 # Integration Methods
@@ -53,18 +100,31 @@ Arguments:
 Modifies sys.state in place.
 """
 function step!(sys, inputs::Vector{Float64}, t::Float64, dt::Float64; method::Symbol=:rk4)
+    throw_if_nonfinite("step_input", sys.id, sys.state, t, dt)
+    throw_if_nonfinite("step_input", sys.id, inputs, t, dt)
+
     # Create dynamics function closed over inputs
     f = (u, t_) -> eval_dynamics(sys.machine, u, inputs, nothing, t_)
 
-    if method == :euler
-        sys.state .= euler_step(f, sys.state, t, dt)
+    next_state = if method == :euler
+        euler_step(f, sys.state, t, dt)
     elseif method == :rk4
-        sys.state .= rk4_step(f, sys.state, t, dt)
+        rk4_step(f, sys.state, t, dt)
     else
         error("Unknown integration method: $method")
     end
 
+    throw_if_nonfinite("step_result", sys.id, next_state, t, dt)
+    sys.state .= next_state
+
     return sys.state
+end
+
+function check_composed_outputs!(world, t::Float64, dt::Float64)
+    for (sys_id, sys) in world.systems
+        output = readout(sys.machine, sys.state, nothing, world.time)
+        throw_if_nonfinite("readout", sys_id, output, t, dt)
+    end
 end
 
 # =============================================================================
@@ -98,17 +158,22 @@ function step_composed!(
     method::Symbol=:rk4
 )
     machine = composed_info.machine
+    throw_if_nonfinite("composed_input", "composed_system", composed_state, t, dt)
+    throw_if_nonfinite("composed_input", "composed_system", external_inputs, t, dt)
 
     # Create dynamics function
     f = (u, t_) -> eval_dynamics(machine, u, external_inputs, nothing, t_)
 
-    if method == :euler
-        composed_state .= euler_step(f, composed_state, t, dt)
+    next_state = if method == :euler
+        euler_step(f, composed_state, t, dt)
     elseif method == :rk4
-        composed_state .= rk4_step(f, composed_state, t, dt)
+        rk4_step(f, composed_state, t, dt)
     else
         error("Unknown integration method: $method")
     end
+
+    throw_if_nonfinite("composed_result", "composed_system", next_state, t, dt)
+    composed_state .= next_state
 
     return composed_state
 end
@@ -163,6 +228,9 @@ function step_world!(world, composed_info, dt::Float64; method::Symbol=:rk4)
         end
     end
 
+    # Validate readouts before exposing values to wiring/serialization
+    check_composed_outputs!(world, world.time, dt)
+
     # Advance time
     world.time += dt
 end
@@ -183,7 +251,9 @@ function step_world_independent!(world, dt::Float64; method::Symbol=:rk4)
     # First compute all outputs (needed for wiring)
     outputs = Dict{String, Vector{Float64}}()
     for (sys_id, sys) in world.systems
-        outputs[sys_id] = readout(sys.machine, sys.state, nothing, world.time)
+        out = readout(sys.machine, sys.state, nothing, world.time)
+        throw_if_nonfinite("readout", sys_id, out, world.time, dt)
+        outputs[sys_id] = out
     end
 
     # Build wire map for input lookup

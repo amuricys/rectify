@@ -412,6 +412,7 @@ function serialize_world(world::WorldState)
         "time" => world.time,
         "running" => world.running,
         "speed" => world.speed,
+        "dt" => world.dt,
         "systems" => [serialize_system(sys, world) for sys in values(world.systems)],
         "wires" => [serialize_wire(wire, world) for wire in values(world.wires)]
     )
