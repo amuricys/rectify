@@ -3,7 +3,7 @@
 	import Renderer from '$lib/components/Renderer.svelte';
 	import TSPRenderer from '$lib/components/TSPRenderer.svelte';
 	import OptimizationControls from '$lib/components/OptimizationControls.svelte';
-	import AlgebraicRenderer from '$lib/components/AlgebraicRenderer.svelte';
+	import AlgebraicScene from '$lib/threlte/AlgebraicScene.svelte';
 	import AlgebraicControls from '$lib/components/AlgebraicControls.svelte';
 	import { optimization } from '$lib/stores/optimization.svelte';
 	import { algebraic } from '$lib/stores/algebraic.svelte';
@@ -101,15 +101,15 @@
 			</button>
 		</div>
 		<section class="viewport">
-			<Renderer>
-				{#snippet children({ width, height })}
-					{#if activeTab === 'optimization'}
+			{#if activeTab === 'optimization'}
+				<Renderer>
+					{#snippet children({ width, height })}
 						<TSPRenderer {width} {height} />
-					{:else}
-						<AlgebraicRenderer {width} {height} />
-					{/if}
-				{/snippet}
-			</Renderer>
+					{/snippet}
+				</Renderer>
+			{:else}
+				<AlgebraicScene />
+			{/if}
 		</section>
 	</main>
 </div>

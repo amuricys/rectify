@@ -1,0 +1,12 @@
+cabal-version: 2.4
+name: rectify-kernels
+version: 0.1.0.0
+build-type: Simple
+synopsis: Small geometry kernels for native GHC and THC comparison
+
+library
+  exposed-modules: Rectify.Geometry.Segments
+  hs-source-dirs: src
+  default-language: Haskell2010
+  ghc-options: -Wall
+  build-depends: base >= 4.14 && < 5

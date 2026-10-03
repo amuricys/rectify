@@ -1,2 +1,3 @@
-packages: */*.cabal
+-- Native Haskell workspace. Clash and THC have independent project files.
+packages: runtimes/haskell/native/rectify-backend.cabal
 tests: True

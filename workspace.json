@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "web",
+      "path": "apps/web",
+      "status": "implemented",
+      "tools": [
+        "npm"
+      ],
+      "commands": {
+        "dev": [
+          "npm",
+          "run",
+          "dev"
+        ],
+        "build": [
+          "npm",
+          "run",
+          "build"
+        ]
+      }
+    },
+    {
+      "id": "julia",
+      "path": "runtimes/julia",
+      "status": "implemented",
+      "tools": [
+        "julia"
+      ],
+      "commands": {
+        "run": [
+          "julia",
+          "--project=.",
+          "run.jl"
+        ]
+      }
+    },
+    {
+      "id": "lean",
+      "path": "runtimes/lean",
+      "status": "implemented",
+      "tools": [
+        "lake"
+      ],
+      "commands": {
+        "build": [
+          "lake",
+          "build"
+        ],
+        "run": [
+          "lake",
+          "exe",
+          "rectify"
+        ]
+      }
+    },
+    {
+      "id": "haskell-native",
+      "path": "runtimes/haskell/native",
+      "status": "experimental",
+      "tools": [
+        "ghc",
+        "cabal"
+      ],
+      "commands": {
+        "build": [
+          "cabal",
+          "build",
+          "rectify-backend:exe:rectify"
+        ]
+      }
+    },
+    {
+      "id": "haskell-thc",
+      "path": "runtimes/haskell/thc",
+      "status": "scaffold",
+      "tools": [
+        "ghc",
+        "thc",
+        "cabal",
+        "java"
+      ],
+      "commands": {}
+    },
+    {
+      "id": "clash",
+      "path": "hardware/clash",
+      "status": "experimental",
+      "tools": [
+        "cabal"
+      ],
+      "commands": {
+        "build": [
+          "cabal",
+          "build"
+        ],
+        "test": [
+          "cabal",
+          "test",
+          "test-library"
+        ]
+      }
+    },
+    {
+      "id": "unison",
+      "path": "runtimes/unison",
+      "status": "planned",
+      "tools": [
+        "ucm"
+      ],
+      "commands": {}
+    },
+    {
+      "id": "bend",
+      "path": "runtimes/bend",
+      "status": "planned",
+      "tools": [
+        "bend"
+      ],
+      "commands": {}
+    }
+  ]
+}

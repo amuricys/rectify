@@ -1,0 +1,34 @@
+{
+  "formatVersion": 1,
+  "id": "geometry-comparison",
+  "status": "probe",
+  "problem": "proper-segment-intersection-and-oriented-area",
+  "algorithm": "quadratic-pair-scan",
+  "implementations": [
+    {
+      "runtime": "ghc",
+      "status": "probe",
+      "command": [
+        "python3",
+        "scripts/haskell_probe.py",
+        "ghc"
+      ]
+    },
+    {
+      "runtime": "thc",
+      "status": "unvalidated",
+      "command": [
+        "python3",
+        "scripts/haskell_probe.py",
+        "thc"
+      ]
+    }
+  ],
+  "conventions": {
+    "endpointContacts": "excluded",
+    "collinearOverlaps": "excluded",
+    "area": "signed twice-area",
+    "numbers": "Double"
+  },
+  "purpose": "Establish compatibility before measuring runtime performance."
+}

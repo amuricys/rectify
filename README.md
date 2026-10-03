@@ -1,183 +1,125 @@
 # rectify
 
-A cozy visualizer for dynamical systems and optimization algorithms.
+A **visual math workbench** for exploring optimization, dynamical systems, and functional programming through interactive experiments.
 
-## Vision
+Choose mathematical objects and operations, watch them evolve, and investigate how they behave. The aim is an expressive workbench with a cozy visual interface, where users can eventually describe their own problems and experiments.
 
-Rectify is an interactive tool for exploring mathematical systems visually. The goal is to make abstract concepts tangible through real-time visualization with a relaxing, aesthetic interface.
+## Project direction
 
-**Dynamical Systems**: Visualize chaotic attractors, oscillators, and other continuous systems. Adjust parameters in real-time, scrub through time, and measure system properties.
+Rectify began with visual optimization: select a **problem** independently from an **algorithm**. Problems of interest include traveling-salesman tours, surface free-energy minimization, and reservoir-computer topology search. Algorithm directions include simulated annealing, genetic algorithms, and particle swarm optimization.
 
-**Optimization Algorithms**: Watch simulated annealing, genetic algorithms, TSP solvers, and eventually neural networks iterate toward solutions. See the process, not just the result.
+Compositional dynamical systems form another workbench and are the current focus. Applied category theory motivates building larger systems by wiring smaller systems together. The project also serves as a home base for exploring Haskell, Julia, Lean, Clash, and potentially other languages and runtimes.
 
-**Open Systems & Composition**: Using ideas from applied category theory (via AlgebraicJulia), systems can be wired together—the output of one becoming the input of another. Build modular, composable dynamical systems.
+Read [VISION.md](VISION.md) for the full direction: user-defined experiments, the unresolved surface model and 3D extension, proofs, runtime parallelism, THC, and Unison distributed experiments. These ambitions extend beyond the implemented features below.
 
-## Architecture
+## Documentation
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     rectify-frontend (Svelte)                   │
-│                        http://localhost:5173                    │
-│                                                                 │
-│   ┌─────────────────┐              ┌─────────────────────────┐  │
-│   │  ThreeJS        │              │  Controls               │  │
-│   │  Renderer       │              │  - Play/Pause/Step      │  │
-│   │                 │              │  - System selection     │  │
-│   │  - Trajectories │              │  - Wiring (Julia)       │  │
-│   │  - Multi-system │              │  - Parameters           │  │
-│   └─────────────────┘              └─────────────────────────┘  │
-└──────────────┬────────────────────────────────┬─────────────────┘
-               │                                │
-               │ WebSocket                      │ WebSocket
-               │ ws://localhost:8081            │ ws://localhost:8082
-               │                                │
-┌──────────────▼──────────────┐  ┌──────────────▼──────────────────┐
-│     rectify-lean (Lean 4)   │  │     rectify-julia (Julia)       │
-│                             │  │                                 │
-│  Single closed systems:     │  │  Open composable systems:       │
-│  - Lorenz attractor         │  │  - Multiple systems in parallel │
-│  - Harmonic oscillator      │  │  - Runtime wiring of I/O ports  │
-│  - Duffing oscillator       │  │  - AlgebraicDynamics.jl         │
-│  - Van der Pol oscillator   │  │  - Catlab.jl (category theory)  │
-│                             │  │                                 │
-│  Uses SciLean for verified  │  │  Dynamic system definition      │
-│  ODE integration (RK4)      │  │  and composition at runtime     │
-└─────────────────────────────┘  └─────────────────────────────────┘
-```
+- [VISION.md](VISION.md): project intent, research directions, and open decisions.
+- [docs/REPOSITORY.md](docs/REPOSITORY.md): layout, implementation axes, and migration map.
+- [AGENTS.md](AGENTS.md): shared guidance for agents working in the repository.
+- [CLAUDE.md](CLAUDE.md): entry point directing Claude to the same guidance.
+- [ARCHITECTURE.md](ARCHITECTURE.md): earlier open-systems design proposal; some details differ from current code.
 
-## Tech Stack
+## Current application
 
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| Frontend | Svelte 5 + SvelteKit | Reactive UI with modern runes API |
-| 3D Rendering | Three.js | WebGL visualization of trajectories |
-| Backend (verified) | Lean 4 + SciLean | Type-safe dynamical systems with compile-time guarantees |
-| Backend (dynamic) | Julia + AlgebraicDynamics.jl | Runtime-composable open systems via category theory |
-| Dev Environment | Nix | Reproducible builds across all components |
+The Svelte 5 frontend has two active tabs:
 
-## Getting Started
+| Workbench | Backend | Implemented foundations |
+| --- | --- | --- |
+| Open Systems | Julia, WebSocket on port 8082 | Built-in attractors and oscillators, custom equations, runtime wiring, parameter editing, integration, trajectory and time-series views. |
+| Optimization | Lean 4, WebSocket on port 8081 | Traveling-salesman problem over 30 Finnish cities, simulated annealing, play/pause/step/reset, and tour visualization. |
 
-### Prerequisites
+The open-systems renderer is being migrated from a large imperative Three.js component to Threlte components in `apps/web/src/lib/threlte/`. Treat this as work in progress, including its interactions.
 
-- [Nix](https://nixos.org/download.html) with flakes enabled
+Julia represents systems as AlgebraicDynamics `ContinuousMachine`s. The current composition implementation manually routes signals between machines inside a combined machine; it does not construct a Catlab wiring diagram and call `oapply`. Integration uses explicit Euler or RK4 routines. The frontend stores a rolling history for visualization.
 
-### Development
+The active Lean server runs optimization. Separate oscillator modules use SciLean, but they are not the active server path. Their presence should not be read as a claim that all numerical or geometric behavior has been formally verified.
+
+## Repository map
+
+| Directory | Purpose |
+| --- | --- |
+| `apps/web/` | SvelteKit frontend, Three.js/Threlte rendering, controls, and WebSocket stores. |
+| `runtimes/julia/` | Open-system templates, custom equations, world state, composition, integration, and WebSocket server. |
+| `runtimes/lean/` | Active TSP/annealing server, optimization abstractions, separate dynamical-system modules, and C WebSocket bindings. |
+| `runtimes/haskell/native/` | Earlier Haskell optimization server and surface experiments, including sized boundaries and circular indexing. |
+| `runtimes/haskell/kernels/` | Dependency-light geometry baseline for compiler comparisons. |
+| `runtimes/haskell/thc/` | Separate THC compatibility probe; native GHC reference runner. |
+| `runtimes/unison/` | Distributed experiments, including proposed optimizer islands and neural-network training. |
+| `runtimes/bend/` | Proposed parallel geometry experiment. |
+| `workbenches/` | Mathematical entry points across implementations. |
+| `contracts/`, `experiments/` | Interface documentation and experiment descriptions. |
+| `hardware/clash/` | FPGA reservoir-computing experiments in Clash. |
+| `infra/` | Terranix/Nix infrastructure experiments, including AWS FPGA provisioning sketches. |
+| `flake.nix` | Development shells and incomplete package-build definitions. |
+
+The Haskell and Clash work is outside the current frontend path, but remains part of the project's research direction. There are no Bend or Unison implementations yet, and no general user-defined optimization language or completed topology-search-to-FPGA pipeline.
+
+## Workspace commands
+
+Run these from the repository root:
 
 ```bash
-# Enter the development environment (includes Node, Lean, Julia)
+python3 scripts/workspace.py list
+python3 scripts/workspace.py doctor
+python3 scripts/workspace.py check
+python3 scripts/workspace.py run web dev
+python3 scripts/workspace.py run web build
+python3 scripts/haskell_probe.py ghc
+```
+
+The workspace helper dispatches explicit local commands. It does not install toolchains or deploy services. Planned runtimes have no runnable actions. See [THC setup](runtimes/haskell/thc/README.md) and [Unison direction](runtimes/unison/README.md).
+
+## Development
+
+Nix development shells are defined for the full environment and individual parts:
+
+```bash
 nix develop
-
-# Or enter specific sub-environments
-nix develop .#frontend   # Just Node/npm
-nix develop .#lean       # Just Lean toolchain
-nix develop .#julia      # Just Julia
+# Or choose one:
+nix develop .#frontend
+nix develop .#lean
+nix develop .#julia
 ```
 
-### Running
+The Nix package outputs are not finished; the development shells and deployable packages are separate concerns. Equivalent local toolchains can also be used.
 
-**Frontend** (Svelte):
+Start the frontend and the backend for the desired tab in separate terminals.
+
+### Frontend
+
 ```bash
-cd rectify-frontend
+cd apps/web
 npm install
 npm run dev
-# → http://localhost:5173
+# http://localhost:5173
 ```
 
-**Backend** (Lean — single closed systems):
-```bash
-cd rectify-lean
-lake build
-lake exe rectify
-# → ws://localhost:8081
-```
+### Julia open systems
 
-**Backend** (Julia — composable open systems):
 ```bash
-cd rectify-julia
+cd runtimes/julia
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. run.jl
-# → ws://localhost:8082
+# ws://localhost:8082
 ```
 
-## Project Structure
+### Lean optimization
 
-```
-rectify/
-├── flake.nix              # Nix flake for reproducible dev environment
-├── rectify-frontend/      # Svelte 5 + SvelteKit + Three.js
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── components/
-│   │   │   │   ├── Renderer.svelte        # Agnostic canvas container
-│   │   │   │   ├── LorenzRenderer.svelte  # ThreeJS for Lean backend
-│   │   │   │   ├── AlgebraicRenderer.svelte # ThreeJS for Julia backend
-│   │   │   │   ├── Controls.svelte        # Lean backend controls
-│   │   │   │   └── AlgebraicControls.svelte # Julia backend controls
-│   │   │   └── stores/
-│   │   │       ├── dynamics.svelte.ts     # Lean WebSocket state
-│   │   │       └── algebraic.svelte.ts    # Julia WebSocket state
-│   │   └── routes/
-│   │       └── +page.svelte               # Main application
-│   └── package.json
-├── rectify-lean/          # Lean 4 dynamical systems server
-│   ├── lakefile.lean
-│   └── src/
-│       ├── Rectify.lean                   # Main server + state machine
-│       ├── Rectify/
-│       │   ├── Dynamics/
-│       │   │   ├── Lorenz.lean
-│       │   │   ├── HarmonicOscillator.lean
-│       │   │   ├── DuffingOscillator.lean
-│       │   │   └── VanDerPolOscillator.lean
-│       │   └── WebSockets.lean            # FFI bindings
-│       └── Rectify/WebSockets.c           # libwebsockets integration
-├── rectify-julia/         # Julia AlgebraicDynamics server
-│   ├── Project.toml
-│   ├── run.jl
-│   └── src/
-│       ├── Systems.jl                     # Open system definitions
-│       └── Server.jl                      # WebSocket server + world state
-├── rectify-backend/       # (Legacy) Haskell optimization algorithms
-└── rectify-clash/         # (Legacy) FPGA reservoir computing
+```bash
+cd runtimes/lean
+lake build
+lake exe rectify
+# ws://localhost:8081
 ```
 
-## Concepts
+The Lean build requires its configured toolchain and native libwebsockets dependencies. Backend addresses are currently hardcoded to localhost in the frontend stores; deployment configuration remains work to do.
 
-### Open vs Closed Systems
+## Validation
 
-A **closed system** evolves according to its own equations with no external input:
-```
-dx/dt = σ(y - x)
-dy/dt = x(ρ - z) - y     ← Lorenz system (closed)
-dz/dt = xy - βz
-```
+`npm run build` in `apps/web/` produces the static frontend. Its package manifest currently has no `check` or `test` script. A successful build does not validate browser interactions or backend mathematics.
 
-An **open system** has typed input and output ports:
-```
-         ┌─────────────┐
-  ρ_ext ─┤             ├─ x
-         │   Lorenz    ├─ y
-         │             ├─ z
-         └─────────────┘
-```
-
-Open systems can be **composed** by wiring outputs to inputs:
-```
-┌──────────┐         ┌──────────┐
-│ Harmonic │─ pos ──▶│  Lorenz  │
-│ Oscillator│        │  (ρ_ext) │
-└──────────┘         └──────────┘
-```
-
-This composition is formalized using **operads** from category theory, ensuring that compositions are mathematically well-typed.
-
-### Why Two Backends?
-
-**Lean** provides compile-time verification. The differential equations are part of the type system; SciLean generates correct-by-construction integrators. This is ideal for "blessed" systems where correctness matters.
-
-**Julia** provides runtime flexibility. Users can define arbitrary equations, compose systems dynamically, and experiment freely. AlgebraicDynamics.jl handles the categorical machinery for safe composition.
-
-The long-term vision is to bridge these: verify composition rules in Lean, execute in Julia, with a certified protocol between them.
+The native Haskell tree contains old tests whose Cabal stanza is currently disabled and whose imports need updating. Clash has its own test target; the new geometry probe has an independent runner. The active frontend and Julia paths do not yet have a general automated suite. Verify the affected behavior explicitly when making changes, and distinguish successful builds from runtime checks and mathematical guarantees.
 
 ## License
 

@@ -1,0 +1,37 @@
+{
+  "formatVersion": 1,
+  "id": "optimizer-islands",
+  "status": "proposed",
+  "problem": "tsp",
+  "algorithm": "island-search",
+  "localAlgorithm": "simulated-annealing",
+  "implementation": {
+    "runtime": "unison",
+    "status": "planned"
+  },
+  "parameters": {
+    "islands": 4,
+    "topology": "directed-ring",
+    "migrationEveryRounds": 10,
+    "baseSeed": 42
+  },
+  "semantics": {
+    "initialMode": "synchronous rounds",
+    "migration": "best candidate to next island",
+    "adoption": "only if strictly better under the same objective"
+  },
+  "observations": [
+    "island-best-tour",
+    "fitness-history",
+    "work-count",
+    "candidate-migration",
+    "candidate-adoption"
+  ],
+  "openDecisions": [
+    "city dataset and distance convention",
+    "local annealing parameters",
+    "seed derivation per island",
+    "candidate diversity metric",
+    "asynchronous mode and event recording"
+  ]
+}

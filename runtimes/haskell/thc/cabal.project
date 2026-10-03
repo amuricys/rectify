@@ -1,0 +1,3 @@
+-- Keep THC's compiler/dependency requirements separate from the server and Clash.
+packages: ../kernels/rectify-kernels.cabal
+          rectify-thc-probe.cabal

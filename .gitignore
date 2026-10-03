@@ -17,4 +17,13 @@ result
 *.lake
 terraform.tfstate*
 config.tf.json
-!rectify-frontend/dist/index.html
+!apps/web/dist/index.html
+
+# Local runtime state and comparison results
+runtimes/unison/.local/
+runtimes/unison/**/.unison/
+runtimes/unison/**/*.uc
+runtimes/unison/**/*.output
+**/__pycache__/
+*.pyc
+.runs/

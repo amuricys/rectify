@@ -19,7 +19,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [
-          (lean4-nix.readToolchainFile ./rectify-lean/lean-toolchain)
+          (lean4-nix.readToolchainFile ./runtimes/lean/lean-toolchain)
         ];
 
         pkgs = import nixpkgs {
@@ -37,7 +37,7 @@
         # ──────────────────────────────────────────────────────────────
         rectify-lean = pkgs.lean.buildLeanPackage {
           name = "Rectify";
-          src = ./rectify-lean;
+          src = ./runtimes/lean;
         };
 
         # ──────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@
         frontend = pkgs.buildNpmPackage {
           pname = "rectify-frontend";
           version = "0.1.0";
-          src = ./rectify-frontend;
+          src = ./apps/web;
           npmDepsHash = ""; # Will need to be filled after first build attempt
 
           buildPhase = ''
@@ -95,9 +95,9 @@
             echo "╔════════════════════════════════════════════════════════════╗"
             echo "║  rectify dev environment                                   ║"
             echo "╠════════════════════════════════════════════════════════════╣"
-            echo "║  Frontend (Svelte):  cd rectify-frontend && npm run dev    ║"
-            echo "║  Backend (Lean):     cd rectify-lean && lake build && lake exe rectify  ║"
-            echo "║  Backend (Julia):    cd rectify-julia && julia --project=. run.jl       ║"
+            echo "║  Frontend (Svelte):  cd apps/web && npm run dev    ║"
+            echo "║  Backend (Lean):     cd runtimes/lean && lake build && lake exe rectify  ║"
+            echo "║  Backend (Julia):    cd runtimes/julia && julia --project=. run.jl       ║"
             echo "╚════════════════════════════════════════════════════════════╝"
           '';
 
@@ -141,7 +141,7 @@
           ];
           shellHook = ''
             echo "Julia environment ready"
-            echo "Run: cd rectify-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'"
+            echo "Run: cd runtimes/julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'"
           '';
         };
       });

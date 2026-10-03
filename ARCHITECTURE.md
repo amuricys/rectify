@@ -1,5 +1,7 @@
 # Rectify: Architecture for Open Dynamical Systems Visualizer
 
+> Historical design proposal for the compositional-dynamics workbench. This document includes intended behavior and is not a description of everything implemented today. Read [VISION.md](VISION.md) for the broader project direction, [README.md](README.md) for the current application, and [AGENTS.md](AGENTS.md) for development guidance. In particular, the current Julia composition code routes signals manually rather than constructing the wiring diagram and calling `oapply` described below. Protocol details and file paths must be checked against source.
+
 ## 1. System Overview
 
 ```
@@ -560,7 +562,7 @@ Users can define systems via the UI:
 
 ```
 rectify/
-├── rectify-frontend/
+├── apps/web/
 │   ├── src/
 │   │   ├── routes/
 │   │   │   └── +page.svelte
@@ -582,7 +584,7 @@ rectify/
 │   │           └── optimization.svelte.ts
 │   └── package.json
 │
-├── rectify-julia/
+├── runtimes/julia/
 │   ├── src/
 │   │   ├── Rectify.jl           # Main module
 │   │   ├── Server.jl            # WebSocket server
