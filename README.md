@@ -16,6 +16,7 @@ Read [VISION.md](VISION.md) for the full direction: user-defined experiments, th
 
 - [VISION.md](VISION.md): project intent, research directions, and open decisions.
 - [docs/REPOSITORY.md](docs/REPOSITORY.md): layout, implementation axes, and migration map.
+- [infra/README.md](infra/README.md): development shell, local services, and cloud commands.
 - [AGENTS.md](AGENTS.md): shared guidance for agents working in the repository.
 - [CLAUDE.md](CLAUDE.md): entry point directing Claude to the same guidance.
 - [ARCHITECTURE.md](ARCHITECTURE.md): earlier open-systems design proposal; some details differ from current code.
@@ -51,7 +52,7 @@ The active Lean server runs optimization. Separate oscillator modules use SciLea
 | `contracts/`, `experiments/` | Interface documentation and experiment descriptions. |
 | `hardware/clash/` | FPGA reservoir-computing experiments in Clash. |
 | `infra/` | Terranix/Nix infrastructure experiments, including AWS FPGA provisioning sketches. |
-| `flake.nix` | Development shells and incomplete package-build definitions. |
+| `flake.nix` | Full development shell, optional focused shells, and Terranix configuration outputs. |
 
 The Haskell and Clash work is outside the current frontend path, but remains part of the project's research direction. There are no Bend or Unison implementations yet, and no general user-defined optimization language or completed topology-search-to-FPGA pipeline.
 
@@ -82,7 +83,9 @@ nix develop .#lean
 nix develop .#julia
 ```
 
-The Nix package outputs are not finished; the development shells and deployable packages are separate concerns. Equivalent local toolchains can also be used.
+The default shell includes Node, Julia, Lean via Elan, native Haskell, Clash, Unison UCM, Bend/HVM, THC build tools, Terranix, Terraform, and the AWS CLI. THC wrappers select a separate compiler and require a source checkout. Language dependencies and the pinned Lean toolchain are fetched on first use. Equivalent local toolchains can also be used.
+
+After installing the project dependencies described below, `rectify up` starts web, Julia, and Lean together and stops them together. Use `rectify up web julia` to select services. Focused shells remain available, including `.#deploy`, `.#thc`, `.#unison`, and `.#bend`. See [infrastructure commands](infra/README.md) for cloud setup.
 
 Start the frontend and the backend for the desired tab in separate terminals.
 
@@ -113,9 +116,11 @@ lake exe rectify
 # ws://localhost:8081
 ```
 
-The Lean build requires its configured toolchain and native libwebsockets dependencies. Backend addresses are currently hardcoded to localhost in the frontend stores; deployment configuration remains work to do.
+The Lean build requires its configured toolchain and native libwebsockets dependencies. Backend addresses default to localhost. Set `VITE_JULIA_WS_URL` and `VITE_LEAN_WS_URL` before building to change them; see `apps/web/.env.example`. HTTPS deployments require secure WebSocket endpoints.
 
 ## Validation
+
+`python3 scripts/test_tooling.py` checks infrastructure command dispatch and local service cleanup. `nix flake check` checks rendered infrastructure invariants. These checks do not provision cloud resources or establish runtime compatibility.
 
 `npm run build` in `apps/web/` produces the static frontend. Its package manifest currently has no `check` or `test` script. A successful build does not validate browser interactions or backend mathematics.
 

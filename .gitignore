@@ -27,3 +27,9 @@ runtimes/unison/**/*.output
 **/__pycache__/
 *.pyc
 .runs/
+
+# Terraform working directories contain local state and provider caches
+.infra-state/
+*.tfvars
+*.tfvars.json
+*.tfplan

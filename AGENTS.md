@@ -63,6 +63,6 @@ Infrastructure files are experiment scaffolding, not evidence of an active deplo
 
 ## Runtime independence
 
-The root Cabal project includes only the native Haskell server. Clash and the THC probe use separate project files; do not force them onto one compiler version. Keep new compiler experiments out of the default frontend/Julia/Lean environment until their requirements have been validated. Preserve native package names when moving directories.
+The root Cabal project includes only the native Haskell server. Clash and the THC probe use separate project files; do not force them onto one compiler version. The default Nix shell intentionally includes all runtime and deployment toolchains. Keep compiler-specific requirements scoped: native/Clash use GHC 9.8, while the THC wrappers select their own GHC. Tool availability does not establish backend compatibility. Preserve native package names when moving directories.
 
 Use `python3 scripts/workspace.py list` for registered commands and statuses. A scaffold is not a functioning backend. Keep Unison codebase databases local; version reviewable transcripts/exports and explicit project/dependency references instead. Preserve the distinction between a definition in Git and a definition actually loaded into UCM.

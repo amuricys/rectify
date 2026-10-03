@@ -9,8 +9,9 @@ From the repository root:
 ```bash
 python3 scripts/haskell_probe.py ghc
 
-# With a built THC checkout and its driver on PATH:
+# Inside nix develop, with a THC source checkout:
 export RECTIFY_THC_ROOT=/absolute/path/to/thc
+rectify-thc-build
 python3 scripts/haskell_probe.py thc
 ```
 
@@ -26,3 +27,5 @@ Possible follow-ups specific to Rectify:
 - Grow the dependency set only after the small kernel runs correctly.
 
 These are research hypotheses; this scaffold claims neither a speedup nor full server compatibility.
+
+The default Nix shell supplies GraalVM and wrappers for `thc` and `rectify-thc-build`. These wrappers select GHC 9.14 independently of the native/Clash compiler. The THC source itself is not fetched or built on shell entry. `nix develop .#thc` provides the focused environment.

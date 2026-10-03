@@ -1,184 +1,93 @@
-# infra/aws-ec2-nixos.nix
-{ resources, data, provider, output, backend, ... }:
-
-rec {
-  provider.aws = {
-    region  = "eu-west-2";
-    profile = "default";
+{ ... }:
+let
+  # Terraform JSON treats inline rules as complete object values.
+  rule = values: {
+    description = "";
+    ipv6_cidr_blocks = [];
+    prefix_list_ids = [];
+    security_groups = [];
+    self = false;
+  } // values;
+in {
+  variable = {
+    subnet_id = { type = "string"; description = "Public subnet for the backend host."; };
+    client_cidr = { type = "string"; description = "CIDR allowed to reach the backend port."; };
+    backend_image = {
+      type = "string";
+      description = "Publicly pullable linux/amd64 OCI image containing the backend; preferably digest-pinned.";
+    };
+    backend_port = {
+      type = "number";
+      default = 8082;
+      validation = {
+        condition = "\${var.backend_port >= 1 && var.backend_port <= 65535 && floor(var.backend_port) == var.backend_port}";
+        error_message = "backend_port must be an integer from 1 to 65535.";
+      };
+    };
+    instance_type = { type = "string"; default = "t3.small"; };
   };
-
-  # Security group
-  resource.aws_security_group.backend = {
-    name        = "rectify-backend-sg";
-    description = "Security group for NixOS backend";
-    
-    ingress = [
-      {
-        description      = "SSH";
-        from_port        = 22;
-        to_port          = 22;
-        protocol         = "tcp";
-        cidr_blocks      = ["0.0.0.0/0"];
-        ipv6_cidr_blocks = ["::/0"];
-        prefix_list_ids  = [];
-        security_groups  = [];
-        self             = false;
-      }
-      {
-        description      = "Backend API";
-        from_port        = 8080;
-        to_port          = 8080;
-        protocol         = "tcp";
-        cidr_blocks      = ["0.0.0.0/0"];
-        ipv6_cidr_blocks = ["::/0"];
-        prefix_list_ids  = [];
-        security_groups  = [];
-        self             = false;
-      }
-    ];
-    
-    egress = [{
-      description      = "Allow all outbound";
-      from_port        = 0;
-      to_port          = 0;
-      protocol         = "-1";
-      cidr_blocks      = ["0.0.0.0/0"];
-      ipv6_cidr_blocks = ["::/0"];
-      prefix_list_ids  = [];
-      security_groups  = [];
-      self             = false;
-    }];
+  data = {
+    aws_subnet.selected.id = "\${var.subnet_id}";
+    aws_ami.backend = {
+      most_recent = true;
+      owners = [ "amazon" ];
+      filter = [
+        { name = "name"; values = [ "al2023-ami-2023.*-kernel-6.1-x86_64" ]; }
+        { name = "virtualization-type"; values = [ "hvm" ]; }
+      ];
+    };
   };
-
-  # SSH key
-  resource.aws_key_pair.backend = {
-    key_name   = "rectify-backend-key";
-    public_key = "\${file(pathexpand(\"~/.ssh/rectify.pub\"))}";
-  };
-
-  # NixOS AMI
-  data.aws_ami.nixos = {
-    most_recent = true;
-    owners = ["080433136561"];  # NixOS official
-    
-    filter = [
-      {
-        name   = "name";
-        values = ["NixOS-*-x86_64-linux"];
-      }
-      {
-        name   = "virtualization-type";
-        values = ["hvm"];
-      }
-    ];
-  };
-
-  # Create S3 bucket
-  resource.aws_s3_bucket.artifacts = {
-    bucket = "rectify-artifacts-bucket";  # Must be globally unique
-  };
-
-  # Upload the binary directly
-  resource.aws_s3_object.backend_binary = {
-    bucket = "\${aws_s3_bucket.artifacts.id}";
-    key    = "rectify";
-    
-    # Terraform sees this is a file path and handles the upload!
-    source = "${backend}/bin/rectify";
-    
-    # Terraform will re-upload if the file changes
-    etag   = "\${filemd5(\"${backend}/bin/rectify\")}";
-  };
-
-  # IAM role so EC2 can access S3
-  resource.aws_iam_role.backend = {
-    name = "rectify-backend-role";
-    
-    assume_role_policy = builtins.toJSON {
-      Version = "2012-10-17";
-      Statement = [{
-        Action = "sts:AssumeRole";
-        Effect = "Allow";
-        Principal.Service = "ec2.amazonaws.com";
+  resource = {
+    aws_security_group.backend = {
+      name_prefix = "\${var.name_prefix}-backend-";
+      vpc_id = "\${data.aws_subnet.selected.vpc_id}";
+      ingress = map rule [{
+        description = "Backend clients";
+        from_port = "\${var.backend_port}";
+        to_port = "\${var.backend_port}";
+        protocol = "tcp";
+        cidr_blocks = [ "\${var.client_cidr}" ];
       }];
+      egress = map rule [{ from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = [ "0.0.0.0/0" ]; }];
+    };
+    aws_iam_role.backend = {
+      name_prefix = "\${var.name_prefix}-backend-";
+      assume_role_policy = builtins.toJSON {
+        Version = "2012-10-17";
+        Statement = [{ Effect = "Allow"; Action = "sts:AssumeRole"; Principal.Service = "ec2.amazonaws.com"; }];
+      };
+    };
+    aws_iam_role_policy_attachment.ssm = {
+      role = "\${aws_iam_role.backend.name}";
+      policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore";
+    };
+    aws_iam_instance_profile.backend.role = "\${aws_iam_role.backend.name}";
+    aws_instance.backend = {
+      ami = "\${data.aws_ami.backend.id}";
+      instance_type = "\${var.instance_type}";
+      subnet_id = "\${var.subnet_id}";
+      associate_public_ip_address = true;
+      vpc_security_group_ids = [ "\${aws_security_group.backend.id}" ];
+      iam_instance_profile = "\${aws_iam_instance_profile.backend.name}";
+      user_data_replace_on_change = true;
+      metadata_options.http_tokens = "required";
+      root_block_device = { volume_size = 30; volume_type = "gp3"; encrypted = true; };
+      user_data = ''
+        #!/bin/bash
+        set -euo pipefail
+        dnf install -y docker
+        systemctl enable --now docker
+        image="$(printf '%s' "''${base64encode(var.backend_image)}" | base64 --decode)"
+        docker pull "$image"
+        docker run -d --name rectify --restart unless-stopped \
+          -p "''${var.backend_port}:''${var.backend_port}" "$image"
+      '';
+      tags.Name = "\${var.name_prefix}-backend";
     };
   };
-
-  # Policy to read from S3
-  resource.aws_iam_role_policy.backend_s3 = {
-    name = "rectify-backend-s3-policy";
-    role = "\${aws_iam_role.backend.id}";
-    
-    policy = builtins.toJSON {
-      Version = "2012-10-17";
-      Statement = [{
-        Effect = "Allow";
-        Action = ["s3:GetObject"];
-        Resource = "\${aws_s3_bucket.artifacts.arn}/*";
-      }];
-    };
+  output = {
+    instance_id.value = "\${aws_instance.backend.id}";
+    public_ip.value = "\${aws_instance.backend.public_ip}";
+    websocket_url.value = "ws://\${aws_instance.backend.public_ip}:\${var.backend_port}";
   };
-
-  # ADD: Instance profile
-  resource.aws_iam_instance_profile.backend = {
-    name = "rectify-backend-profile";
-    role = "\${aws_iam_role.backend.name}";
-  };
-
-
-  # EC2 instance with download logic
-  resource.aws_instance.backend = {
-    ami                         = "\${data.aws_ami.nixos.id}";
-    instance_type               = "t2.micro";
-    key_name                    = resource.aws_key_pair.backend.key_name;
-    vpc_security_group_ids      = ["\${aws_security_group.backend.id}"];
-    associate_public_ip_address = true;
-    
-    # IAM role for S3 access
-    iam_instance_profile = "\${aws_iam_instance_profile.backend.id}";
-    
-    root_block_device = {
-      volume_size = 30;
-      volume_type = "gp2";
-    };
-    
-    # Download binary on boot
-    user_data = ''
-      #!/bin/bash
-      
-      # Download binary from S3
-      aws s3 cp s3://\$\{aws_s3_bucket.artifacts.id}/rectify /usr/local/bin/rectify
-      chmod +x /usr/local/bin/rectify
-      
-      # Create systemd service
-      cat > /etc/systemd/system/rectify.service << EOF
-      [Unit]
-      Description=Rectify Backend
-      After=network.target
-      
-      [Service]
-      Type=simple
-      ExecStart=/usr/local/bin/rectify
-      Restart=always
-      
-      [Install]
-      WantedBy=multi-user.target
-      EOF
-      
-      systemctl daemon-reload
-      systemctl enable rectify
-      systemctl start rectify
-    '';
-    
-    tags = {
-      Name = "rectify-backend-nixos";
-    };
-    
-    # ADD: Wait for instance to be ready
-    depends_on = [
-      "aws_s3_object.backend_binary"
-    ];
-  };
-  output.public_ip.value = "\${aws_instance.backend.public_ip}";
-  output.public_dns.value = "\${aws_instance.backend.public_dns}";
 }

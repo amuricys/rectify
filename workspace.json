@@ -68,6 +68,11 @@
           "cabal",
           "build",
           "rectify-backend:exe:rectify"
+        ],
+        "run": [
+          "cabal",
+          "run",
+          "rectify-backend:exe:rectify"
         ]
       }
     },

@@ -32,7 +32,7 @@ class OptimizationConnection {
 	private ws: WebSocket | null = null;
 	private url: string;
 
-	constructor(url: string = 'ws://localhost:8081') {
+	constructor(url: string = (import.meta.env.VITE_LEAN_WS_URL || 'ws://localhost:8081')) {
 		this.url = url;
 	}
 

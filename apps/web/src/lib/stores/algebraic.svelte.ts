@@ -129,7 +129,7 @@ function createAlgebraicStore() {
 	const historyLength = 2000;
 	let ws: WebSocket | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-	const url = 'ws://localhost:8082';
+	const url = (import.meta.env.VITE_JULIA_WS_URL || 'ws://localhost:8082');
 
 	function send(msg: object) {
 		if (ws?.readyState === WebSocket.OPEN) {

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 manifest = json.loads((ROOT / "workspace.json").read_text())
@@ -14,12 +15,16 @@ sub = parser.add_subparsers(dest="operation", required=True)
 sub.add_parser("list")
 sub.add_parser("doctor")
 sub.add_parser("check")
+up = sub.add_parser("up")
+up.add_argument("projects", nargs="*")
 run = sub.add_parser("run")
 run.add_argument("project", choices=projects)
 run.add_argument("action")
 args = parser.parse_args()
 
-if args.operation == "list":
+if args.operation == "up":
+    raise SystemExit(subprocess.run([sys.executable, str(ROOT / "scripts/dev.py")] + args.projects).returncode)
+elif args.operation == "list":
     for project in projects.values():
         actions = ", ".join(project["commands"]) or "no runnable integration yet"
         print(f"{project['id']:16} {project['status']:13} {project['path']} ({actions})")
